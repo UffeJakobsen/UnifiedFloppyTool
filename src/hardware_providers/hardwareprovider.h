@@ -93,11 +93,19 @@ public:
 
     // Basic Interface (required)
     virtual QString displayName() const = 0;
+
+public slots:
+    /* MF-147 (HW-01): these are slots so HardwareManager can dispatch them
+     * onto a worker thread via Qt::QueuedConnection without blocking the
+     * UI thread. Provider implementations may do blocking serial / USB /
+     * QProcess I/O here. */
     virtual void setHardwareType(const QString &hardwareType) = 0;
     virtual void setDevicePath(const QString &devicePath) = 0;
     virtual void setBaudRate(int baudRate) = 0;
     virtual void detectDrive() = 0;
     virtual void autoDetectDevice() = 0;
+
+public:
 
     // Connection Management
     virtual bool connect() { return false; }

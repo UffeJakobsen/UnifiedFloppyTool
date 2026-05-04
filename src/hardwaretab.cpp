@@ -116,6 +116,19 @@ HardwareTab::HardwareTab(QWidget *parent)
                 Q_UNUSED(info);
                 updateStatus(tr("Drive detected via provider"));
             });
+    /* MF-147 (HW-01): operation lifecycle from worker thread.
+     * Provider I/O now runs on a worker QThread inside HardwareManager,
+     * so the UI no longer freezes during detect/auto-detect. We surface
+     * progress on the status line; finer-grained button-disable comes
+     * later when worker-driven read/write paths land. */
+    connect(m_hwManager, &HardwareManager::operationStarted,
+            this, [this](const QString &name) {
+                updateStatus(tr("Hardware: %1 in progress…").arg(name));
+            });
+    connect(m_hwManager, &HardwareManager::operationFinished,
+            this, [this](const QString &name) {
+                updateStatus(tr("Hardware: %1 done").arg(name));
+            });
 
     setupButtonGroups();
     setupConnections();
