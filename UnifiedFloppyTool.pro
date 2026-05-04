@@ -45,17 +45,18 @@ message("HAL (Hardware Abstraction Layer) ENABLED")
 TARGET = UnifiedFloppyTool
 TEMPLATE = app
 
-# Qt 6.10+ requires C++20
-# C++ Standard: immer c++17 als Basis.
-# C++20-Features im Code sind mit #if __cplusplus >= 202002L abgesichert.
-# Für C++20-Build explizit: qmake CONFIG+=cxx20
-cxx20 {
+# C++ Standard: c++20 ist ab refactor/type-driven-hal Default.
+# Type-Driven HAL (rule H-1/H-2 final form) braucht <concepts>, std::variant
+# Sum-Types und if-constexpr-Conformance-Tests. Qt 6.10 + MinGW 13 + AppleClang
+# 15 + GCC 11 unterstützen C++20 vollständig.
+# Wer einen alten Compiler hat: qmake CONFIG+=cxx17 (Notausgang, fliegt mit v5.0 raus).
+cxx17 {
+    CONFIG += c++17
+    message("C++17 aktiv (legacy fallback — wird mit v5.0 entfernt)")
+} else {
     CONFIG += c++20
     DEFINES += UFT_CXX20
-    message("C++20 aktiv (explizit angefordert)")
-} else {
-    CONFIG += c++17
-    message("C++17 aktiv (Standard)")
+    message("C++20 aktiv (Standard ab refactor/type-driven-hal)")
 }
 
 CONFIG += sdk_no_version_check

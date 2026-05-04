@@ -19,8 +19,10 @@ if(UNIX)
     endif()
 endif()
 
-# Find all test source files
-file(GLOB TEST_SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/test_*.c")
+# Find all test source files (.c for legacy + .cpp for type-driven HAL).
+file(GLOB TEST_SOURCES_C   "${CMAKE_CURRENT_SOURCE_DIR}/test_*.c")
+file(GLOB TEST_SOURCES_CPP "${CMAKE_CURRENT_SOURCE_DIR}/test_*.cpp")
+set(TEST_SOURCES ${TEST_SOURCES_C} ${TEST_SOURCES_CPP})
 
 # Exclude tests with missing dependencies (TODO: implement these modules)
 set(EXCLUDED_TESTS
@@ -61,7 +63,8 @@ foreach(test_source ${TEST_SOURCES})
     # Self-contained tests: no UFT library dependencies at all
     set(_SELF_CONTAINED_TESTS
         test_pll test_recovery test_roundtrip
-        test_writer_backend test_woz_writer test_platform)
+        test_writer_backend test_woz_writer test_platform
+        test_hal_foundation)  # MF-150: type-driven HAL foundation, header-only
     list(FIND _SELF_CONTAINED_TESTS ${test_name} _sc_idx)
     if(${_sc_idx} GREATER -1)
         set(TEST_LIBS "")  # No UFT libs needed
