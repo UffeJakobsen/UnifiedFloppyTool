@@ -528,8 +528,7 @@ TrackData FC5025HardwareProvider::readTrack(const ReadParams &params)
         TrackData td;
         td.cylinder = params.cylinder;
         td.head = params.head;
-        td.error = tr("FC5025: Not connected");
-        td.errorMessage = td.error;
+        uft_set_track_error(td, tr("FC5025: Not connected"));  /* MF-149 H-9 */
         return td;
     }
 
@@ -628,8 +627,7 @@ OperationResult FC5025HardwareProvider::writeTrack(const WriteParams &params,
 
     OperationResult res;
     res.success = false;
-    res.error = tr("FC5025 is a read-only device — writing is not supported");
-    res.errorMessage = res.error;
+    uft_set_op_error(res, tr("FC5025 is a read-only device — writing is not supported"));  /* MF-149 H-9 */
     return res;
 }
 
@@ -754,17 +752,16 @@ TrackData FC5025HardwareProvider::readTrackViaCli(int cylinder, int head, int re
      * temporary file. */
     QString fmtArg = fcimageFormatArg(m_diskFormat);
     if (fmtArg.isEmpty()) {
-        td.error = tr("FC5025: No fcimage format mapping for format code %1")
-                       .arg(static_cast<int>(m_diskFormat));
-        td.errorMessage = td.error;
+        uft_set_track_error(td,                              /* MF-149 H-9 */
+            tr("FC5025: No fcimage format mapping for format code %1")
+            .arg(static_cast<int>(m_diskFormat)));
         return td;
     }
 
     QTemporaryFile tmpFile;
     tmpFile.setAutoRemove(true);
     if (!tmpFile.open()) {
-        td.error = tr("FC5025: Cannot create temporary file");
-        td.errorMessage = td.error;
+        uft_set_track_error(td, tr("FC5025: Cannot create temporary file"));  /* MF-149 H-9 */
         return td;
     }
     tmpFile.close();  /* close so fcimage can write to it */
@@ -793,8 +790,7 @@ TrackData FC5025HardwareProvider::readTrackViaCli(int cylinder, int head, int re
         if (proc.exitCode() == 0) {
             /* Read the output file */
             if (!tmpFile.open()) {
-                td.error = tr("FC5025: Cannot re-open temp file");
-                td.errorMessage = td.error;
+                uft_set_track_error(td, tr("FC5025: Cannot re-open temp file"));  /* MF-149 H-9 */
                 return td;
             }
 
@@ -802,8 +798,7 @@ TrackData FC5025HardwareProvider::readTrackViaCli(int cylinder, int head, int re
             tmpFile.close();
 
             if (!td.data.isEmpty()) {
-                td.success = true;
-                td.valid = true;
+                uft_set_track_success(td, true);   /* MF-149 H-9 */
 
                 /* Estimate good sector count from format info */
                 const fc5025::FormatInfo *fi = currentFormatInfo();
@@ -819,9 +814,9 @@ TrackData FC5025HardwareProvider::readTrackViaCli(int cylinder, int head, int re
                  << "failed for track" << cylinder << "head" << head;
     }
 
-    td.error = tr("FC5025: fcimage failed for track %1 head %2 after %3 retries")
-                   .arg(cylinder).arg(head).arg(retries);
-    td.errorMessage = td.error;
+    uft_set_track_error(td,                                  /* MF-149 H-9 */
+        tr("FC5025: fcimage failed for track %1 head %2 after %3 retries")
+        .arg(cylinder).arg(head).arg(retries));
     return td;
 }
 
@@ -892,8 +887,7 @@ TrackData FC5025HardwareProvider::readTrackViaUsb(int cylinder, int head, int re
 
         if (csw[0] == fc5025::CSW_OK) {
             td.data = buf;
-            td.success = true;
-            td.valid = true;
+            uft_set_track_success(td, true);   /* MF-149 H-9 */
             td.badSectors = 0;
 
             if (fi && fi->sectorSize > 0) {
@@ -916,12 +910,10 @@ TrackData FC5025HardwareProvider::readTrackViaUsb(int cylinder, int head, int re
                      << "head" << head << ", attempt" << attempt;
             /* Continue retrying — we might get a clean read */
         } else if (csw[0] == fc5025::CSW_NO_INDEX) {
-            td.error = tr("FC5025: No index pulse — is a disk inserted?");
-            td.errorMessage = td.error;
+            uft_set_track_error(td, tr("FC5025: No index pulse — is a disk inserted?"));  /* MF-149 H-9 */
             return td;  /* No point retrying */
         } else if (csw[0] == fc5025::CSW_NOT_READY) {
-            td.error = tr("FC5025: Drive not ready");
-            td.errorMessage = td.error;
+            uft_set_track_error(td, tr("FC5025: Drive not ready"));  /* MF-149 H-9 */
             return td;
         } else {
             qDebug() << "FC5025: CSW status" << csw[0]
@@ -932,23 +924,22 @@ TrackData FC5025HardwareProvider::readTrackViaUsb(int cylinder, int head, int re
 
     /* If we got partial data from CRC-error retries, return it */
     if (!td.data.isEmpty()) {
-        td.success = true;
-        td.valid = true;
-        td.error = tr("FC5025: Track %1 head %2 — CRC errors after %3 retries")
-                       .arg(cylinder).arg(head).arg(retries);
-        td.errorMessage = td.error;
+        uft_set_track_success(td, true);                     /* MF-149 H-9 */
+        uft_set_track_error(td,                              /* MF-149 H-9 */
+            tr("FC5025: Track %1 head %2 — CRC errors after %3 retries")
+            .arg(cylinder).arg(head).arg(retries));
         return td;
     }
 
-    td.error = tr("FC5025: Failed to read track %1 head %2 after %3 retries")
-                   .arg(cylinder).arg(head).arg(retries);
-    td.errorMessage = td.error;
+    uft_set_track_error(td,                                  /* MF-149 H-9 */
+        tr("FC5025: Failed to read track %1 head %2 after %3 retries")
+        .arg(cylinder).arg(head).arg(retries));
     return td;
 
 #else
     Q_UNUSED(retries);
-    td.error = tr("FC5025: Direct USB support not compiled (UFT_FC5025_SUPPORT)");
-    td.errorMessage = td.error;
+    uft_set_track_error(td,                                  /* MF-149 H-9 */
+        tr("FC5025: Direct USB support not compiled (UFT_FC5025_SUPPORT)"));
     return td;
 #endif
 }

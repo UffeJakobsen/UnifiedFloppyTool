@@ -52,25 +52,90 @@ struct WriteParams {
     QString format;
 };
 
+/* MF-149 (rule H-9): the alias members `valid` and `errorMessage`
+ * carry a [[deprecated]] attribute so that named access — e.g.
+ * `td.errorMessage` in user code — surfaces a compile-time warning.
+ *
+ * gcc emits the warning twice: once at the genuine call-site (which
+ * is what we want), and once at the struct's implicit special-member
+ * generation in every including TU (false positive — the user did
+ * nothing wrong). To avoid drowning every translation unit in noise,
+ * we wrap the deprecated members in a localized warning-suppression
+ * pragma. The suppression is scoped to the struct definition; user
+ * code that names `.valid` or `.errorMessage` outside this header
+ * still gets the warning. */
+#if defined(__GNUC__) || defined(__clang__)
+#  define UFT_H9_DEPRECATED_PUSH \
+       _Pragma("GCC diagnostic push") \
+       _Pragma("GCC diagnostic ignored \"-Wdeprecated-declarations\"")
+#  define UFT_H9_DEPRECATED_POP _Pragma("GCC diagnostic pop")
+#else
+#  define UFT_H9_DEPRECATED_PUSH
+#  define UFT_H9_DEPRECATED_POP
+#endif
+
 struct TrackData {
     int cylinder = 0;
     int head = 0;
     QByteArray data;
     QByteArray rawFlux;
     bool success = false;
-    bool valid = false;       // Added (alias for success)
     QString error;
-    QString errorMessage;     // Added (alias for error)
     int badSectors = 0;
     int goodSectors = 0;
+
+    UFT_H9_DEPRECATED_PUSH
+    [[deprecated("MF-149 (rule H-9): use TrackData::success; will be removed in v5.0")]]
+    bool valid = false;
+    [[deprecated("MF-149 (rule H-9): use TrackData::error; will be removed in v5.0")]]
+    QString errorMessage;
+    UFT_H9_DEPRECATED_POP
 };
 
 struct OperationResult {
     bool success = false;
     QString error;
-    QString errorMessage;     // Added (alias for error)
     int retriesUsed = 0;
+
+    UFT_H9_DEPRECATED_PUSH
+    [[deprecated("MF-149 (rule H-9): use OperationResult::error; will be removed in v5.0")]]
+    QString errorMessage;
+    UFT_H9_DEPRECATED_POP
 };
+
+/* MF-149 (rule H-9) write helpers.
+ *
+ * During the deprecation window (v4.x), callers want to set BOTH the
+ * canonical field AND its alias so older readers keep working. These
+ * inline helpers do that in one place and locally suppress the
+ * deprecated-write warning the gcc attribute would otherwise emit.
+ *
+ * After v5.0 removes `valid` / `errorMessage`, these helpers degrade
+ * to simple field writes (the `_PUSH/_POP` becomes a no-op).
+ *
+ * Callers should write:
+ *     uft_set_track_success(td, true);                  // sets both
+ *     uft_set_track_error(td, "msg");                   // sets both
+ *     uft_set_op_error(opr, "msg");                     // sets both
+ * instead of `td.valid = ...` / `td.errorMessage = ...`. */
+inline void uft_set_track_success(TrackData &td, bool ok) {
+    td.success = ok;
+    UFT_H9_DEPRECATED_PUSH
+    td.valid = ok;
+    UFT_H9_DEPRECATED_POP
+}
+inline void uft_set_track_error(TrackData &td, const QString &msg) {
+    td.error = msg;
+    UFT_H9_DEPRECATED_PUSH
+    td.errorMessage = msg;
+    UFT_H9_DEPRECATED_POP
+}
+inline void uft_set_op_error(OperationResult &opr, const QString &msg) {
+    opr.error = msg;
+    UFT_H9_DEPRECATED_PUSH
+    opr.errorMessage = msg;
+    UFT_H9_DEPRECATED_POP
+}
 
 Q_DECLARE_METATYPE(DetectedDriveInfo)
 Q_DECLARE_METATYPE(HardwareInfo)

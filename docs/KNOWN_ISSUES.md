@@ -155,6 +155,34 @@ aktiv abgearbeitet.
 
 ## Meta-Ebene
 
+### M.-2 TrackData / OperationResult duplicate alias fields (MF-149, rule H-9)
+
+- **Status:** MITIGATED (deprecated 2026-05-04, removal planned for v5.0)
+- **Datei:** `src/hardware_providers/hardwareprovider.h`
+- **Beschreibung:** Die DTOs `TrackData` und `OperationResult` enthielten
+  je zwei Aliase für denselben Wert:
+  - `TrackData::valid` ↔ `TrackData::success` (bool)
+  - `TrackData::errorMessage` ↔ `TrackData::error` (QString)
+  - `OperationResult::errorMessage` ↔ `OperationResult::error` (QString)
+  Konsumenten konnten je nach Provider mal das eine, mal das andere Feld
+  finden. In `fluxenginehardwareprovider.cpp` und
+  `kryofluxhardwareprovider.cpp` schrieben einige Pfade nur den Alias
+  (`errorMessage`) und liessen `error` leer — Reader, die das kanonische
+  Feld lasen, sahen `""` und glaubten an ein erfolgreiches Ergebnis.
+- **Fix (v4.x Migrationsfenster):** Aliase mit `[[deprecated]]` markiert
+  (lokal pragma-suppressed innerhalb des Structs, damit nur User-Site-
+  Zugriffe die Warnung auslösen). Drei `inline`-Helfer in `hardwareprovider.h`
+  (`uft_set_track_success`, `uft_set_track_error`, `uft_set_op_error`)
+  schreiben kanonisches Feld + Alias atomar; alle 30+ Schreib-Stellen
+  in den 9 Hardware-Providern + `unified_hal_bridge.cpp` migriert. Reader
+  in `fluxengine`/`kryoflux` von `.valid` auf `.success` umgestellt.
+- **v5.0 Plan:** `valid` und `errorMessage` ersatzlos entfernen, Helfer
+  reduzieren auf einfache Feld-Schreibung.
+- **Regression-Schutz:** Build mit `-Wdeprecated-declarations` ist clean
+  ausserhalb der Header-internen False Positives.
+
+---
+
 ### M.-1 ATX-Probe Byte-Order-Bug (entdeckt + behoben 2026-04-24)
 
 - **Status:** CLOSED (Fix + Test-Aktivierung in derselben Session)

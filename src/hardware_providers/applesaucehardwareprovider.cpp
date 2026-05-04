@@ -682,18 +682,18 @@ TrackData ApplesauceHardwareProvider::readTrack(const ReadParams &params)
 #if AS_SERIAL_AVAILABLE
     if (!isConnected()) {
         result.error = tr("Not connected");
-        result.errorMessage = result.error;
+        uft_set_track_error(result, result.error);  /* MF-149 H-9 */
         return result;
     }
 
     if (!seekCylinder(params.cylinder)) {
         result.error = tr("Seek failed");
-        result.errorMessage = result.error;
+        uft_set_track_error(result, result.error);  /* MF-149 H-9 */
         return result;
     }
     if (!selectHead(params.head)) {
         result.error = tr("Head select failed");
-        result.errorMessage = result.error;
+        uft_set_track_error(result, result.error);  /* MF-149 H-9 */
         return result;
     }
 
@@ -702,7 +702,7 @@ TrackData ApplesauceHardwareProvider::readTrack(const ReadParams &params)
     QByteArray rawFlux = readRawFlux(params.cylinder, params.head, revolutions);
     if (rawFlux.isEmpty()) {
         result.error = tr("Flux read returned no data");
-        result.errorMessage = result.error;
+        uft_set_track_error(result, result.error);  /* MF-149 H-9 */
         return result;
     }
 
@@ -712,8 +712,7 @@ TrackData ApplesauceHardwareProvider::readTrack(const ReadParams &params)
      * values in 8 MHz ticks (125 ns per tick). Store as-is for the caller;
      * higher-level decoders will handle the conversion. */
     result.data = rawFlux;
-    result.success = true;
-    result.valid = true;
+    uft_set_track_success(result, true);  /* MF-149 H-9 */
     result.goodSectors = 0;  /* Sector decoding done at higher layer */
     result.badSectors = 0;
 
@@ -724,8 +723,7 @@ TrackData ApplesauceHardwareProvider::readTrack(const ReadParams &params)
     emit trackRead(params.cylinder, params.head, true);
     emit trackReadComplete(params.cylinder, params.head, true);
 #else
-    result.error = tr("SerialPort not available");
-    result.errorMessage = result.error;
+    uft_set_track_error(result, tr("SerialPort not available"));  /* MF-149 H-9 */
 #endif
 
     return result;
@@ -853,13 +851,13 @@ OperationResult ApplesauceHardwareProvider::writeTrack(const WriteParams &params
 #if AS_SERIAL_AVAILABLE
     if (!isConnected()) {
         result.error = tr("Not connected");
-        result.errorMessage = result.error;
+        uft_set_track_error(result, result.error);  /* MF-149 H-9 */
         return result;
     }
 
     if (data.isEmpty()) {
         result.error = tr("No flux data to write");
-        result.errorMessage = result.error;
+        uft_set_track_error(result, result.error);  /* MF-149 H-9 */
         return result;
     }
 
@@ -868,31 +866,31 @@ OperationResult ApplesauceHardwareProvider::writeTrack(const WriteParams &params
     if (isOn(wpResp)) {
         /* '+' means write-protected */
         result.error = tr("Disk is write-protected");
-        result.errorMessage = result.error;
+        uft_set_track_error(result, result.error);  /* MF-149 H-9 */
         return result;
     }
 
     if (!seekCylinder(params.cylinder)) {
         result.error = tr("Seek failed");
-        result.errorMessage = result.error;
+        uft_set_track_error(result, result.error);  /* MF-149 H-9 */
         return result;
     }
     if (!selectHead(params.head)) {
         result.error = tr("Head select failed");
-        result.errorMessage = result.error;
+        uft_set_track_error(result, result.error);  /* MF-149 H-9 */
         return result;
     }
 
     /* Ensure PSU and motor are on */
     if (!ensurePowerOn()) {
         result.error = tr("PSU power-on failed");
-        result.errorMessage = result.error;
+        uft_set_track_error(result, result.error);  /* MF-149 H-9 */
         return result;
     }
     if (!m_motorOn) {
         if (!setMotor(true)) {
             result.error = tr("Motor on failed");
-            result.errorMessage = result.error;
+            uft_set_track_error(result, result.error);  /* MF-149 H-9 */
             return result;
         }
     }
@@ -901,7 +899,7 @@ OperationResult ApplesauceHardwareProvider::writeTrack(const WriteParams &params
     if (dataSize > m_maxBufferSize) {
         result.error = tr("Flux data too large (%1 bytes, max %2)")
             .arg(dataSize).arg(m_maxBufferSize);
-        result.errorMessage = result.error;
+        uft_set_track_error(result, result.error);  /* MF-149 H-9 */
         return result;
     }
 
@@ -925,7 +923,7 @@ OperationResult ApplesauceHardwareProvider::writeTrack(const WriteParams &params
         if (!isOk(clearResp)) {
             if (retry < maxRetries) continue;
             result.error = tr("data:clear failed: %1").arg(clearResp);
-            result.errorMessage = result.error;
+            uft_set_track_error(result, result.error);  /* MF-149 H-9 */
             return result;
         }
 
@@ -936,7 +934,7 @@ OperationResult ApplesauceHardwareProvider::writeTrack(const WriteParams &params
         if (!isOk(uploadResp)) {
             if (retry < maxRetries) continue;
             result.error = tr("data upload failed: %1").arg(uploadResp);
-            result.errorMessage = result.error;
+            uft_set_track_error(result, result.error);  /* MF-149 H-9 */
             return result;
         }
 
@@ -946,7 +944,7 @@ OperationResult ApplesauceHardwareProvider::writeTrack(const WriteParams &params
         if (!isOk(writeResp)) {
             if (retry < maxRetries) continue;
             result.error = tr("disk:write failed: %1").arg(writeResp);
-            result.errorMessage = result.error;
+            uft_set_track_error(result, result.error);  /* MF-149 H-9 */
             return result;
         }
 
@@ -959,13 +957,11 @@ OperationResult ApplesauceHardwareProvider::writeTrack(const WriteParams &params
         return result;
     }
 
-    result.error = tr("Write failed after %1 retries").arg(maxRetries);
-    result.errorMessage = result.error;
+    uft_set_op_error(result, tr("Write failed after %1 retries").arg(maxRetries));  /* MF-149 H-9 */
 #else
     Q_UNUSED(params);
     Q_UNUSED(data);
-    result.error = tr("SerialPort not available");
-    result.errorMessage = result.error;
+    uft_set_op_error(result, tr("SerialPort not available"));  /* MF-149 H-9 */
 #endif
 
     return result;

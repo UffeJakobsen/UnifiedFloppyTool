@@ -484,8 +484,7 @@ TrackData ADFCopyHardwareProvider::readTrack(const ReadParams &params)
     }
 
     result.data = trackData;
-    result.success = true;
-    result.valid = true;
+    uft_set_track_success(result, true);  /* MF-149 H-9 */
     result.goodSectors = wasWeak ? 0 : ADFC_DD_SECTORS;
     result.badSectors = wasWeak ? ADFC_DD_SECTORS : 0;
 

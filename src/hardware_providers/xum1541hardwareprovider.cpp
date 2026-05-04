@@ -447,8 +447,7 @@ TrackData Xum1541HardwareProvider::readTrack(const ReadParams &params)
     result.data        = trackBuf;
     result.goodSectors = goodSectors;
     result.badSectors  = badSectors;
-    result.success     = (goodSectors > 0);
-    result.valid       = result.success;
+    uft_set_track_success(result, (goodSectors > 0));  /* MF-149 H-9 */
 
     if (badSectors > 0) {
         result.error = tr("Track %1: %2/%3 sectors failed")

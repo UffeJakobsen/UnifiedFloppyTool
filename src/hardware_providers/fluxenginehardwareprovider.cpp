@@ -227,7 +227,7 @@ TrackData FluxEngineHardwareProvider::readTrack(const ReadParams &params)
     result.head = params.head;
 
     if (!m_connected && !connect()) {
-        result.errorMessage = QStringLiteral("Not connected");
+        uft_set_track_error(result, QStringLiteral("Not connected"));  /* MF-149 H-9 */
         return result;
     }
 
@@ -235,7 +235,7 @@ TrackData FluxEngineHardwareProvider::readTrack(const ReadParams &params)
     QTemporaryFile tempFile;
     tempFile.setFileTemplate(QDir::tempPath() + QStringLiteral("/uft_fe_track_XXXXXX.flux"));
     if (!tempFile.open()) {
-        result.errorMessage = QStringLiteral("Failed to create temp file");
+        uft_set_track_error(result, QStringLiteral("Failed to create temp file"));  /* MF-149 H-9 */
         return result;
     }
     const QString tempPath = tempFile.fileName();
@@ -273,7 +273,7 @@ TrackData FluxEngineHardwareProvider::readTrack(const ReadParams &params)
     }
 
     if (!success) {
-        result.errorMessage = QStringLiteral("Read failed: %1").arg(asText(err));
+        uft_set_track_error(result, QStringLiteral("Read failed: %1").arg(asText(err)));  /* MF-149 H-9 */
         QFile::remove(tempPath);
         return result;
     }
@@ -290,7 +290,7 @@ TrackData FluxEngineHardwareProvider::readTrack(const ReadParams &params)
     
     QFile::remove(tempPath);
 
-    result.valid = true;
+    uft_set_track_success(result, true);  /* MF-149 H-9 */
     m_currentCylinder = params.cylinder;
 
     emit trackReadComplete(params.cylinder, params.head, true);
@@ -344,7 +344,7 @@ QVector<TrackData> FluxEngineHardwareProvider::readDisk(int startCyl, int endCyl
             currentTrack++;
             emit progressChanged(currentTrack, totalTracks);
 
-            if (!track.valid) {
+            if (!track.success) {  /* MF-149 H-9: was track.valid */
                 emit operationError(QStringLiteral("Failed to read C%1 H%2")
                     .arg(cyl).arg(head));
             }
@@ -363,12 +363,12 @@ OperationResult FluxEngineHardwareProvider::writeTrack(const WriteParams &params
     OperationResult result;
 
     if (!m_connected && !connect()) {
-        result.errorMessage = QStringLiteral("Not connected");
+        uft_set_op_error(result, QStringLiteral("Not connected"));  /* MF-149 H-9 */
         return result;
     }
 
     if (data.isEmpty()) {
-        result.errorMessage = QStringLiteral("No data to write");
+        uft_set_op_error(result, QStringLiteral("No data to write"));  /* MF-149 H-9 */
         return result;
     }
 
@@ -376,7 +376,7 @@ OperationResult FluxEngineHardwareProvider::writeTrack(const WriteParams &params
     QTemporaryFile tempFile;
     tempFile.setFileTemplate(QDir::tempPath() + QStringLiteral("/uft_fe_write_XXXXXX.flux"));
     if (!tempFile.open()) {
-        result.errorMessage = QStringLiteral("Failed to create temp file");
+        uft_set_op_error(result, QStringLiteral("Failed to create temp file"));  /* MF-149 H-9 */
         return result;
     }
     
@@ -417,7 +417,7 @@ OperationResult FluxEngineHardwareProvider::writeTrack(const WriteParams &params
     QFile::remove(tempPath);
 
     if (!success) {
-        result.errorMessage = QStringLiteral("Write failed: %1").arg(asText(err));
+        uft_set_op_error(result, QStringLiteral("Write failed: %1").arg(asText(err)));  /* MF-149 H-9 */
         emit trackWriteComplete(params.cylinder, params.head, false);
         return result;
     }
@@ -430,8 +430,8 @@ OperationResult FluxEngineHardwareProvider::writeTrack(const WriteParams &params
         readParams.revolutions = 1;
 
         TrackData verifyData = readTrack(readParams);
-        if (!verifyData.valid) {
-            result.errorMessage = QStringLiteral("Write OK but verify failed");
+        if (!verifyData.success) {  /* MF-149 H-9: was verifyData.valid */
+            uft_set_op_error(result, QStringLiteral("Write OK but verify failed"));  /* MF-149 H-9 */
             emit trackWriteComplete(params.cylinder, params.head, false);
             return result;
         }

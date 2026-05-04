@@ -34,7 +34,7 @@ TrackData toTrackData(const uft_track_t &src)
     td.valid   = td.success;
     if (!td.success) {
         td.error        = QStringLiteral("HAL error %1").arg(src.error);
-        td.errorMessage = td.error;
+        uft_set_track_error(td, td.error);  /* MF-149 H-9 */
     }
     td.goodSectors = 0;
     td.badSectors  = src.errors;

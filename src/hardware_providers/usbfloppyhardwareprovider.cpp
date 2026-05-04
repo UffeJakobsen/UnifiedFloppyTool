@@ -176,8 +176,7 @@ TrackData USBFloppyHardwareProvider::readTrack(const ReadParams &params)
                               (uint8_t *)buffer.data(), buffer.size(),
                               &diag) == 0) {
         result.data = buffer;
-        result.success = true;
-        result.valid = true;
+        uft_set_track_success(result, true);  /* MF-149 H-9 */
         result.goodSectors = spt;
         emit trackRead(params.cylinder, params.head, true);
     } else {

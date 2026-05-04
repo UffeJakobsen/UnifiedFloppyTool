@@ -654,18 +654,18 @@ TrackData SCPHardwareProvider::readTrack(const ReadParams &params)
 #if SCP_SERIAL_AVAILABLE
     if (!isConnected()) {
         result.error = tr("Not connected");
-        result.errorMessage = result.error;
+        uft_set_track_error(result, result.error);  /* MF-149 H-9 */
         return result;
     }
 
     if (!seekCylinder(params.cylinder)) {
         result.error = tr("Seek failed");
-        result.errorMessage = result.error;
+        uft_set_track_error(result, result.error);  /* MF-149 H-9 */
         return result;
     }
     if (!selectHead(params.head)) {
         result.error = tr("Head select failed");
-        result.errorMessage = result.error;
+        uft_set_track_error(result, result.error);  /* MF-149 H-9 */
         return result;
     }
 
@@ -674,7 +674,7 @@ TrackData SCPHardwareProvider::readTrack(const ReadParams &params)
     QByteArray rawFlux = readRawFlux(params.cylinder, params.head, revolutions);
     if (rawFlux.isEmpty()) {
         result.error = tr("Flux read returned no data");
-        result.errorMessage = result.error;
+        uft_set_track_error(result, result.error);  /* MF-149 H-9 */
         return result;
     }
 
@@ -684,8 +684,7 @@ TrackData SCPHardwareProvider::readTrack(const ReadParams &params)
      * the 40 MHz sample clock. Convert to a linear array of uint16_t timing
      * samples stored as raw bytes for the caller. */
     result.data = rawFlux;
-    result.success = true;
-    result.valid = true;
+    uft_set_track_success(result, true);  /* MF-149 H-9 */
     result.goodSectors = 0;  /* Sector decoding would be done at a higher layer */
     result.badSectors = 0;
 
@@ -697,7 +696,7 @@ TrackData SCPHardwareProvider::readTrack(const ReadParams &params)
     emit trackReadComplete(params.cylinder, params.head, true);
 #else
     result.error = tr("SerialPort not available");
-    result.errorMessage = result.error;
+    uft_set_track_error(result, result.error);  /* MF-149 H-9 */
 #endif
 
     return result;
@@ -846,24 +845,24 @@ OperationResult SCPHardwareProvider::writeTrack(const WriteParams &params, const
 #if SCP_SERIAL_AVAILABLE
     if (!isConnected()) {
         result.error = tr("Not connected");
-        result.errorMessage = result.error;
+        uft_set_op_error(result, result.error);  /* MF-149 H-9 */
         return result;
     }
 
     if (data.isEmpty()) {
         result.error = tr("No flux data to write");
-        result.errorMessage = result.error;
+        uft_set_op_error(result, result.error);  /* MF-149 H-9 */
         return result;
     }
 
     if (!seekCylinder(params.cylinder)) {
         result.error = tr("Seek failed");
-        result.errorMessage = result.error;
+        uft_set_op_error(result, result.error);  /* MF-149 H-9 */
         return result;
     }
     if (!selectHead(params.head)) {
         result.error = tr("Head select failed");
-        result.errorMessage = result.error;
+        uft_set_op_error(result, result.error);  /* MF-149 H-9 */
         return result;
     }
 
@@ -871,14 +870,14 @@ OperationResult SCPHardwareProvider::writeTrack(const WriteParams &params, const
     if (!m_driveSelected) {
         if (!selectDrive(0)) {
             result.error = tr("Drive select failed");
-            result.errorMessage = result.error;
+            uft_set_op_error(result, result.error);  /* MF-149 H-9 */
             return result;
         }
     }
     if (!m_motorOn) {
         if (!setMotor(true)) {
             result.error = tr("Motor on failed");
-            result.errorMessage = result.error;
+            uft_set_op_error(result, result.error);  /* MF-149 H-9 */
             return result;
         }
     }
@@ -894,7 +893,7 @@ OperationResult SCPHardwareProvider::writeTrack(const WriteParams &params, const
     if (dataLength > UFT_SCP_RAM_SIZE) {
         result.error = tr("Flux data too large (%1 bytes, max %2)")
             .arg(dataLength).arg(UFT_SCP_RAM_SIZE);
-        result.errorMessage = result.error;
+        uft_set_op_error(result, result.error);  /* MF-149 H-9 */
         return result;
     }
 
@@ -911,7 +910,7 @@ OperationResult SCPHardwareProvider::writeTrack(const WriteParams &params, const
         if (!loadRamFromUsb(0, dataLength, data)) {
             if (retry < maxRetries) continue;
             result.error = tr("LOADRAM_USB failed");
-            result.errorMessage = result.error;
+            uft_set_op_error(result, result.error);  /* MF-149 H-9 */
             return result;
         }
 
@@ -927,7 +926,7 @@ OperationResult SCPHardwareProvider::writeTrack(const WriteParams &params, const
         if (!sendCommand(SCP_CMD_WRITEFLUX, writePayload)) {
             if (retry < maxRetries) continue;
             result.error = tr("Failed to send WRITEFLUX command");
-            result.errorMessage = result.error;
+            uft_set_op_error(result, result.error);  /* MF-149 H-9 */
             return result;
         }
 
@@ -936,20 +935,20 @@ OperationResult SCPHardwareProvider::writeTrack(const WriteParams &params, const
         if (writeResp.size() < 2) {
             if (retry < maxRetries) continue;
             result.error = tr("WRITEFLUX: no response");
-            result.errorMessage = result.error;
+            uft_set_op_error(result, result.error);  /* MF-149 H-9 */
             return result;
         }
         uint8_t writeStatus = static_cast<uint8_t>(writeResp[1]);
         if (writeStatus == SCP_PR_WPENABLED) {
             result.error = tr("Disk is write-protected");
-            result.errorMessage = result.error;
+            uft_set_op_error(result, result.error);  /* MF-149 H-9 */
             return result;  /* No point retrying write-protect */
         }
         if (writeStatus != SCP_PR_OK) {
             if (retry < maxRetries) continue;
             result.error = tr("WRITEFLUX failed (status=0x%1)")
                 .arg(writeStatus, 2, 16, QChar('0'));
-            result.errorMessage = result.error;
+            uft_set_op_error(result, result.error);  /* MF-149 H-9 */
             return result;
         }
 
@@ -963,12 +962,12 @@ OperationResult SCPHardwareProvider::writeTrack(const WriteParams &params, const
     }
 
     result.error = tr("WRITEFLUX failed after %1 retries").arg(maxRetries);
-    result.errorMessage = result.error;
+    uft_set_op_error(result, result.error);  /* MF-149 H-9 */
 #else
     Q_UNUSED(params);
     Q_UNUSED(data);
     result.error = tr("SerialPort not available");
-    result.errorMessage = result.error;
+    uft_set_op_error(result, result.error);  /* MF-149 H-9 */
 #endif
 
     return result;

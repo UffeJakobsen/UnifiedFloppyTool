@@ -282,14 +282,14 @@ TrackData KryoFluxHardwareProvider::readTrack(const ReadParams &params)
     result.head     = params.head;
 
     if (!m_connected && !connect()) {
-        result.errorMessage = QStringLiteral("Not connected");
+        uft_set_track_error(result, QStringLiteral("Not connected"));  /* MF-149 H-9 */
         return result;
     }
 
     // Create a temp directory for DTC output (it writes trackNN.S.raw files)
     QTemporaryDir tempDir(QDir::tempPath() + QStringLiteral("/uft_kf_XXXXXX"));
     if (!tempDir.isValid()) {
-        result.errorMessage = QStringLiteral("Failed to create temp directory");
+        uft_set_track_error(result, QStringLiteral("Failed to create temp directory"));  /* MF-149 H-9 */
         return result;
     }
 
@@ -339,7 +339,7 @@ TrackData KryoFluxHardwareProvider::readTrack(const ReadParams &params)
     }
 
     if (!success) {
-        result.errorMessage = QStringLiteral("Read failed: %1").arg(asText(err));
+        uft_set_track_error(result, QStringLiteral("Read failed: %1").arg(asText(err)));  /* MF-149 H-9 */
         return result;
     }
 
@@ -374,8 +374,7 @@ TrackData KryoFluxHardwareProvider::readTrack(const ReadParams &params)
         result.data = result.rawFlux;
     }
 
-    result.valid   = true;
-    result.success = true;
+    uft_set_track_success(result, true);  /* MF-149 H-9 */
     m_currentCylinder = params.cylinder;
 
     emit trackReadComplete(params.cylinder, params.head, true);
@@ -515,13 +514,11 @@ QVector<TrackData> KryoFluxHardwareProvider::readDisk(int startCyl, int endCyl, 
             if (rawFile.open(QIODevice::ReadOnly)) {
                 track.rawFlux = rawFile.readAll();
                 track.data    = track.rawFlux;
-                track.valid   = true;
-                track.success = true;
+                uft_set_track_success(track, true);  /* MF-149 H-9 */
                 rawFile.close();
             } else {
-                track.errorMessage = QStringLiteral("Track file not found: %1").arg(rawFileName);
-                track.valid   = false;
-                track.success = false;
+                uft_set_track_success(track, false);  /* MF-149 H-9 */
+                uft_set_track_error(track, QStringLiteral("Track file not found: %1").arg(rawFileName));
                 emit operationError(QStringLiteral("Failed to read C%1 H%2").arg(cyl).arg(head));
             }
 
@@ -529,7 +526,7 @@ QVector<TrackData> KryoFluxHardwareProvider::readDisk(int startCyl, int endCyl, 
             currentTrack++;
             emit progressChanged(currentTrack, totalTracks);
 
-            emit trackReadComplete(cyl, head, track.valid);
+            emit trackReadComplete(cyl, head, track.success);  /* MF-149 H-9: was track.valid */
 
             // Break inner loop if single-head mode
             if (numHeads == 1) {
@@ -554,12 +551,12 @@ OperationResult KryoFluxHardwareProvider::writeTrack(const WriteParams &params,
     OperationResult result;
 
     if (!m_connected && !connect()) {
-        result.errorMessage = QStringLiteral("Not connected");
+        uft_set_op_error(result, QStringLiteral("Not connected"));  /* MF-149 H-9 */
         return result;
     }
 
     if (data.isEmpty()) {
-        result.errorMessage = QStringLiteral("No data to write");
+        uft_set_op_error(result, QStringLiteral("No data to write"));  /* MF-149 H-9 */
         return result;
     }
 
@@ -567,7 +564,7 @@ OperationResult KryoFluxHardwareProvider::writeTrack(const WriteParams &params,
     QTemporaryFile tempFile;
     tempFile.setFileTemplate(QDir::tempPath() + QStringLiteral("/uft_kf_write_XXXXXX.raw"));
     if (!tempFile.open()) {
-        result.errorMessage = QStringLiteral("Failed to create temp file");
+        uft_set_op_error(result, QStringLiteral("Failed to create temp file"));  /* MF-149 H-9 */
         return result;
     }
 
@@ -610,7 +607,7 @@ OperationResult KryoFluxHardwareProvider::writeTrack(const WriteParams &params,
     QFile::remove(tempPath);
 
     if (!success) {
-        result.errorMessage = QStringLiteral("Write failed: %1").arg(asText(err));
+        uft_set_op_error(result, QStringLiteral("Write failed: %1").arg(asText(err)));  /* MF-149 H-9 */
         emit trackWriteComplete(params.cylinder, params.head, false);
         return result;
     }
@@ -623,8 +620,8 @@ OperationResult KryoFluxHardwareProvider::writeTrack(const WriteParams &params,
         readParams.revolutions = 1;
 
         TrackData verifyData = readTrack(readParams);
-        if (!verifyData.valid) {
-            result.errorMessage = QStringLiteral("Write OK but verify read-back failed");
+        if (!verifyData.success) {  /* MF-149 H-9: was verifyData.valid */
+            uft_set_op_error(result, QStringLiteral("Write OK but verify read-back failed"));  /* MF-149 H-9 */
             emit trackWriteComplete(params.cylinder, params.head, false);
             return result;
         }

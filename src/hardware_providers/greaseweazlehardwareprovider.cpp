@@ -647,8 +647,7 @@ TrackData GreaseweazleHardwareProvider::readTrack(const ReadParams &params)
     /* Store decoded samples as raw data (uint32_t array) */
     result.data = QByteArray(reinterpret_cast<const char *>(samples.constData()),
                              static_cast<int>(sampleCount * sizeof(uint32_t)));
-    result.success = true;
-    result.valid = true;
+    uft_set_track_success(result, true);  /* MF-149 H-9 */
     result.goodSectors = 0;  /* Sector decoding would be done at a higher layer */
     result.badSectors = 0;
 
