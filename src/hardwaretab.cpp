@@ -23,6 +23,15 @@
 #include "hardwaretab.h"
 #include "ui_tab_hardware.h"
 
+/* MF-157 (P1.4): the V2 provider must be COMPLETE in this TU because:
+ *   - HardwareTab's destructor (defined here) must instantiate
+ *     unique_ptr<GreaseweazleProviderV2>::~unique_ptr,
+ *   - onConnect() constructs an instance,
+ *   - the codegen-emitted wire_hardware_tab() function (which lives in
+ *     generated/tab_hardware_wiring.gen.cpp) calls do_*() through the
+ *     wire_action template. */
+#include "hardware_providers/greaseweazle_provider_v2.h"
+
 #include <QMessageBox>
 #include <QRandomGenerator>
 #include <QDebug>
@@ -201,7 +210,10 @@ void HardwareTab::setupConnections()
             onConnect();
         }
     });
-    connect(ui->btnDetect, &QPushButton::clicked, this, &HardwareTab::onDetectDrive);
+    /* MF-157 (P1.4): btnDetect is now wired through the codegen — see
+     * forms/tab_hardware.actions.yaml + generated/tab_hardware_wiring.gen.cpp.
+     * The V1 onDetectDrive() slot is retained for now (TODO P1.18) so any
+     * other call-site or test that invokes it directly keeps working. */
     connect(ui->comboController, QOverload<int>::of(&QComboBox::currentIndexChanged),
             this, &HardwareTab::onControllerChanged);
     
@@ -216,9 +228,9 @@ void HardwareTab::setupConnections()
                 onDetectionModeChanged();
             });
     
-    // Motor control
-    connect(ui->btnMotorOn, &QPushButton::clicked, this, &HardwareTab::onMotorOn);
-    connect(ui->btnMotorOff, &QPushButton::clicked, this, &HardwareTab::onMotorOff);
+    /* MF-157 (P1.4): btnMotorOn / btnMotorOff are now codegen-wired
+     * (ControlsMotor capability). Their V1 slots stay as legacy reachable
+     * methods until P1.18. */
     connect(ui->checkAutoSpinDown, &QCheckBox::toggled, this, &HardwareTab::onAutoSpinDownChanged);
     
     // Drive settings (for manual mode)
@@ -237,11 +249,9 @@ void HardwareTab::setupConnections()
     connect(ui->checkDoubleStep, &QCheckBox::toggled, this, &HardwareTab::onDoubleStepChanged);
     connect(ui->checkIgnoreIndex, &QCheckBox::toggled, this, &HardwareTab::onIgnoreIndexChanged);
     
-    // Test buttons
-    connect(ui->btnSeekTest, &QPushButton::clicked, this, &HardwareTab::onSeekTest);
-    connect(ui->btnReadTest, &QPushButton::clicked, this, &HardwareTab::onReadTest);
-    connect(ui->btnRPMTest, &QPushButton::clicked, this, &HardwareTab::onRPMTest);
-    connect(ui->btnCalibrate, &QPushButton::clicked, this, &HardwareTab::onCalibrate);
+    /* MF-157 (P1.4): btnSeekTest, btnReadTest, btnRPMTest, btnCalibrate
+     * are now codegen-wired (SeeksHead / ReadsRawFlux / MeasuresRPM /
+     * Recalibrates capabilities). V1 slots stay until P1.18. */
 
     // HAL-H7: inject "Unified Capture" next to the existing test buttons.
     // Added programmatically so no .ui XML edit is needed.
@@ -257,6 +267,34 @@ void HardwareTab::setupConnections()
             connect(btn, &QPushButton::clicked, this, &HardwareTab::onUnifiedCapture);
         }
     }
+
+    /* MF-157 (P1.4): initial codegen wiring pass.
+     *
+     * No V2 provider is bound yet at construction time. The codegen-emitted
+     * `wire_hardware_tab(this)` will run Phase 1 (disconnect — currently no
+     * connections to remove) and Phase 2 (disable each capability button)
+     * because `currentProviderV2()` returns nullptr. The disable IS the
+     * "no controller selected yet" UI affordance. After onConnect() succeeds
+     * for Greaseweazle, rewireV2() runs again and Phase 3 takes over. */
+    rewireV2();
+}
+
+void HardwareTab::rewireV2()
+{
+    /* The codegen function is the single chokepoint for V2 wiring.
+     * Calling it is idempotent: Phase 1 strips any prior wiring before
+     * Phase 2/3 makes a fresh decision based on currentProviderV2(). */
+    ::uft::gui::generated::wire_hardware_tab(this);
+}
+
+::uft::hal::GreaseweazleProviderV2 *HardwareTab::currentProviderV2() const noexcept
+{
+    /* Returns the V2 wrapper around the Greaseweazle C-HAL handle, or
+     * nullptr when no GW device is currently open. Other controllers do
+     * not yet have V2 wrappers (P1.6–P1.13); for those, this returns
+     * nullptr and the codegen Phase 2 disables every action button —
+     * structurally honest about where the V2 architecture is fully wired. */
+    return m_gwProviderV2.get();
 }
 
 // ============================================================================
@@ -729,13 +767,22 @@ void HardwareTab::onConnect()
             
             // Store handle for later use
             m_gwDevice = gw;
+
+            /* MF-157 (P1.4): wrap the open C-HAL handle in a V2 mixin
+             * provider, then re-run the codegen wiring so every
+             * capability-bound button connects through the type-driven
+             * pipeline. V1 slots remain reachable for legacy call-sites
+             * (e.g. WorkflowTab/FluxCaptureJob) until P1.18. */
+            m_gwProviderV2 = std::make_unique<::uft::hal::GreaseweazleProviderV2>(gw);
+            rewireV2();
+
             m_connected = true;
             setConnectionState(true);
-            
+
             if (m_autoDetect) {
                 autoDetectDrive();
             }
-            
+
             QString deviceName = getDeviceName();
             updateStatus(tr("Connected to %1 (%2)")
                 .arg(deviceName)
@@ -781,6 +828,24 @@ void HardwareTab::onDisconnect()
         onMotorOff();
     }
     
+    /* MF-157 (P1.4): destroy the V2 wrapper FIRST so the codegen-emitted
+     * Phase-1 disconnect runs while the wrapper still exists (lambdas
+     * captured against a freshly-destroyed pointer would not be invoked
+     * — disconnect strips them — but doing things in the right order
+     * keeps the pre-/post-state of the codegen function unambiguous).
+     *
+     * Order:
+     *   1. unique_ptr.reset()            → destroys V2 wrapper
+     *   2. rewireV2()                    → Phase 1 disconnect, Phase 2
+     *                                      disable (provider now null)
+     *   3. uft_gw_close() on m_gwDevice  → closes the C handle the
+     *                                      wrapper was holding (the
+     *                                      wrapper does NOT own the
+     *                                      handle — it's a non-owning
+     *                                      reference, see the V2 ctor). */
+    m_gwProviderV2.reset();
+    rewireV2();
+
     // Close HAL device if open
     #ifdef UFT_HAS_HAL
     if (m_gwDevice != nullptr) {
@@ -788,15 +853,157 @@ void HardwareTab::onDisconnect()
         m_gwDevice = nullptr;
     }
     #endif
-    
+
     m_connected = false;
     m_hwModel = 0;
     setConnectionState(false);
     clearDetectedInfo();
-    
+
     updateStatus(tr("Disconnected."));
     emit connectionChanged(false);
     emit deviceInfoChanged(QString(), QString());
+}
+
+/* ════════════════════════════════════════════════════════════════════════
+ *  MF-157 (P1.4) — Type-Driven HAL handler overload set
+ *
+ *  Each handler corresponds to one alternative of one Sum-Type from
+ *  `include/uft/hal/outcomes.h`. They are invoked by std::visit dispatch
+ *  inside the codegen-emitted wire_hardware_tab() function — never
+ *  directly. Adding a new alternative to a Sum-Type requires adding a
+ *  matching overload here, otherwise the std::visit call inside
+ *  generated/tab_hardware_wiring.gen.cpp fails to compile. That is the
+ *  forensic guarantee turning "we should preserve every case" into a
+ *  build break.
+ *
+ *  Each handler must SURFACE the variant detail, not summarize. Rule F-3
+ *  (preserve forensic detail) and F-4 (3-part errors) are both upheld
+ *  here.
+ * ════════════════════════════════════════════════════════════════════════ */
+
+/* MotorOutcome */
+void HardwareTab::onMotorOutcome(const ::uft::hal::MotorRunning &v)
+{
+    m_motorRunning = true;
+    updateMotorControlsEnabled();
+    updateStatus(tr("Motor running (RPM=%1)").arg(v.measured_rpm, 0, 'f', 1));
+}
+void HardwareTab::onMotorOutcome(const ::uft::hal::MotorStopped &)
+{
+    m_motorRunning = false;
+    updateMotorControlsEnabled();
+    updateStatus(tr("Motor stopped"));
+}
+void HardwareTab::onMotorOutcome(const ::uft::hal::MotorStalled &v)
+{
+    m_motorRunning = false;
+    updateMotorControlsEnabled();
+    updateStatus(tr("Motor stalled: %1").arg(QString::fromStdString(v.reason)),
+                 /*isError=*/true);
+}
+
+/* SeekOutcome */
+void HardwareTab::onSeekOutcome(const ::uft::hal::SeekArrived &v)
+{
+    updateStatus(tr("Seek arrived at cylinder %1").arg(v.cylinder));
+}
+void HardwareTab::onSeekOutcome(const ::uft::hal::SeekOvershot &v)
+{
+    updateStatus(tr("Seek overshot: requested %1, actual %2")
+                     .arg(v.requested).arg(v.actual),
+                 /*isError=*/true);
+}
+void HardwareTab::onSeekOutcome(const ::uft::hal::SeekTrack0Failed &v)
+{
+    updateStatus(tr("Track-0 calibration failed: %1")
+                     .arg(QString::fromStdString(v.reason)),
+                 /*isError=*/true);
+}
+
+/* RpmOutcome */
+void HardwareTab::onRpmOutcome(const ::uft::hal::RpmMeasured &v)
+{
+    updateStatus(tr("RPM=%1 (jitter=%2%, %3 revs sampled)")
+                     .arg(v.rpm, 0, 'f', 2)
+                     .arg(v.jitter_pct, 0, 'f', 2)
+                     .arg(v.revolutions_sampled));
+}
+
+/* DetectOutcome */
+void HardwareTab::onDetectOutcome(const ::uft::hal::DriveDetected &v)
+{
+    m_detectedTracks = v.tracks;
+    m_detectedHeads = v.heads;
+    updateStatus(tr("Drive detected: %1 (%2 tracks, %3 heads, %4 RPM nominal)")
+                     .arg(QString::fromStdString(v.drive_kind))
+                     .arg(v.tracks).arg(v.heads)
+                     .arg(v.rpm_nominal, 0, 'f', 0));
+}
+void HardwareTab::onDetectOutcome(const ::uft::hal::DriveAbsent &v)
+{
+    updateStatus(tr("No drive detected (scanned for %1)")
+                     .arg(QString::fromStdString(v.scanned_for)),
+                 /*isError=*/true);
+}
+
+/* FluxOutcome */
+void HardwareTab::onFluxOutcome(const ::uft::hal::FluxCaptured &v)
+{
+    updateStatus(tr("Flux captured C%1/H%2: %3 transitions, %4 revolutions, %5 ns/sample")
+                     .arg(v.position.cylinder).arg(v.position.head)
+                     .arg(v.transitions_ns.size())
+                     .arg(v.revolutions)
+                     .arg(v.sample_ns, 0, 'f', 1));
+}
+void HardwareTab::onFluxOutcome(const ::uft::hal::FluxMarginal &v)
+{
+    /* F-3: do NOT collapse the marginal flux — preserve transition count
+     * and the anomaly note for the audit trail. */
+    updateStatus(tr("Flux MARGINAL at C%1/H%2: %3 transitions, anomaly: %4")
+                     .arg(v.position.cylinder).arg(v.position.head)
+                     .arg(v.transitions_ns.size())
+                     .arg(QString::fromStdString(v.anomaly_note)),
+                 /*isError=*/true);
+}
+void HardwareTab::onFluxOutcome(const ::uft::hal::FluxUnreadable &v)
+{
+    updateStatus(tr("Flux unreadable at C%1/H%2: %3")
+                     .arg(v.position.cylinder).arg(v.position.head)
+                     .arg(QString::fromStdString(v.physical_reason)),
+                 /*isError=*/true);
+}
+
+/* Cross-variant alternatives (every Outcome carries them) */
+void HardwareTab::showProviderError(const ::uft::hal::ProviderError &e)
+{
+    /* F-4: surface ALL three parts. The status bar gets `what`, the log
+     * (qWarning) gets all three. A future P1.5 pass can replace the log
+     * line with a proper 3-part dialog. */
+    updateStatus(tr("Error: %1").arg(QString::fromStdString(e.what)),
+                 /*isError=*/true);
+    qWarning("[HardwareTab] ProviderError\n  what: %s\n  why : %s\n  fix : %s",
+             e.what.c_str(), e.why.c_str(), e.fix.c_str());
+}
+void HardwareTab::showHardwareDisconnected(const ::uft::hal::HardwareDisconnected &d)
+{
+    updateStatus(tr("Hardware disconnected (%1)")
+                     .arg(QString::fromStdString(d.device_path)),
+                 /*isError=*/true);
+    /* The provider is gone. Tear down the V2 wrapper + rewire so the UI
+     * matches reality, then run the V1 disconnect for the rest of the
+     * legacy state (m_connected, m_gwDevice, etc.). */
+    m_gwProviderV2.reset();
+    rewireV2();
+    if (m_connected) {
+        onDisconnect();
+    }
+}
+void HardwareTab::showPolicyRequired(const ::uft::hal::CapabilityRequiresPolicy &p)
+{
+    /* TODO P1.6/P1.7: open a proper consent dialog. For now we flag it
+     * loudly in the status bar so the operation is not silently dropped. */
+    updateStatus(tr("Policy gate: %1").arg(QString::fromStdString(p.explain)),
+                 /*isError=*/true);
 }
 
 void HardwareTab::onControllerChanged(int index)

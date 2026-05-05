@@ -71,6 +71,11 @@ Accepted YAML subset (intentionally small — additive changes only):
 
   tab: <CamelCase identifier>          # required; Cpp class name
   provider_source: <Cpp expression>    # required; produces a V2 provider*
+  extra_includes:                      # optional; list of header paths
+    - <header.h>                       #   prepended above the wiring_runtime.h
+                                       #   include in the generated file. Use
+                                       #   for the tab class header, the uic
+                                       #   header, the V2 provider header, etc.
   actions:                             # required; list of action entries
     - widget: <name from .ui>
       requires: <Capability>           # one of KNOWN_CAPABILITIES
@@ -141,6 +146,7 @@ def parse_yaml(text: str, source_label: str) -> dict[str, Any]:
     actions: list[dict[str, Any]] = []
     cur_action: dict[str, Any] | None = None
     in_actions = False
+    in_extra_includes = False
     in_on_outcome = False
 
     for raw_lineno, raw in enumerate(text.splitlines(), start=1):
@@ -157,10 +163,15 @@ def parse_yaml(text: str, source_label: str) -> dict[str, Any]:
         # Top-level key: value
         if indent == 0:
             in_actions = False
+            in_extra_includes = False
             in_on_outcome = False
             cur_action = None
             if body == "actions:":
                 in_actions = True
+                continue
+            if body == "extra_includes:":
+                in_extra_includes = True
+                root["extra_includes"] = []
                 continue
             if ":" not in body:
                 fail(
@@ -171,6 +182,12 @@ def parse_yaml(text: str, source_label: str) -> dict[str, Any]:
                 )
             k, _, v = body.partition(":")
             root[k.strip()] = v.strip()
+            continue
+
+        # `extra_includes:` list of scalar strings — '- header.h'
+        if in_extra_includes and body.startswith("- "):
+            item = body[2:].strip()
+            root["extra_includes"].append(item)
             continue
 
         # `actions:` list item — '-' at indent>=2
@@ -315,16 +332,12 @@ HEADER = """\
 // UFT Master Coding Standards: a YAML entry referencing a capability no
 // provider implements will fail to compile at the wire_action<cap::X> call.
 
-#include "uft/gui/wiring_runtime.h"
+{extra_includes_block}#include "uft/gui/wiring_runtime.h"
 
 namespace uft::gui::generated {{
 
 void wire_{tab_snake}(class {tab} *self) {{
     namespace cap = ::uft::gui::cap;
-    auto *provider = {provider_source};
-    if (!provider) {{
-        return;
-    }}
 """
 
 FOOTER = """\
@@ -347,6 +360,18 @@ def emit(spec: dict[str, Any], ui_rel: str, yaml_rel: str) -> str:
     tab = spec["tab"]
     provider_source = spec["provider_source"]
     actions = spec["actions"]
+    sorted_actions = sorted(actions, key=lambda x: x["widget"])
+
+    # Build the extra-includes block. YAML order is preserved — the YAML
+    # author controls include order, important for headers with implicit
+    # dependencies (e.g. ui_*.h after the tab header).
+    extra_includes = spec.get("extra_includes", [])
+    if extra_includes:
+        extra_includes_block = (
+            "".join(f'#include "{h}"\n' for h in extra_includes) + "\n"
+        )
+    else:
+        extra_includes_block = ""
 
     parts: list[str] = []
     parts.append(
@@ -356,11 +381,57 @@ def emit(spec: dict[str, Any], ui_rel: str, yaml_rel: str) -> str:
             tab=tab,
             tab_snake=camel_to_snake(tab),
             provider_source=provider_source,
+            extra_includes_block=extra_includes_block,
         )
     )
 
-    # Sort actions by widget name for deterministic output.
-    for a in sorted(actions, key=lambda x: x["widget"]):
+    # ── Phase 1: tear-down any prior wiring on every action button ────
+    # This makes wire_<tab>(self) idempotent + safe to call repeatedly.
+    # Without it, a second invocation would STACK new clicked-handlers on
+    # top of old ones (silent double-execution) and the old handlers
+    # would carry captured pointers to a possibly-destroyed prior provider.
+    parts.append(
+        "    /* Phase 1 — tear down any wiring left from a previous call.\n"
+        "     *\n"
+        "     * `wire_<tab>` is the entry point for both initial wire-up\n"
+        "     * (provider null) and re-wire (provider switched). Without\n"
+        "     * this disconnect, repeated calls would stack signal handlers\n"
+        "     * (silent double-execution) and lambdas captured against an\n"
+        "     * already-destroyed prior provider would dangle until the\n"
+        "     * next click. Disconnecting a still-valid lambda is a no-op\n"
+        "     * — Qt does not invoke its body — so this is safe. */\n"
+    )
+    for a in sorted_actions:
+        parts.append(
+            f"    QObject::disconnect(self->ui->{a['widget']},"
+            f" &QAbstractButton::clicked, nullptr, nullptr);\n"
+        )
+    parts.append("\n")
+
+    # ── Phase 2: provider-null gate ───────────────────────────────────
+    # Disable every action button when no V2 provider is bound. Keeps
+    # the UI consistent with reality (rule H-1) without requiring the
+    # caller to know which buttons are capability-bound.
+    parts.append(
+        f"    auto *provider = {provider_source};\n"
+        "    if (!provider) {\n"
+        "        /* Phase 2 — no provider bound: disable every action\n"
+        "         * button. They will be re-enabled by Phase 3 below on a\n"
+        "         * later call when a V2 provider becomes available. */\n"
+    )
+    for a in sorted_actions:
+        parts.append(
+            f"        self->ui->{a['widget']}->setEnabled(false);\n"
+        )
+    parts.append(
+        "        return;\n"
+        "    }\n"
+        "\n"
+        "    /* Phase 3 — wire each action against the bound provider. */\n"
+    )
+
+    # ── Phase 3: per-action wire_action emission ──────────────────────
+    for a in sorted_actions:
         widget = a["widget"]
         cap = a["requires"]
         invoke = a["invoke"]

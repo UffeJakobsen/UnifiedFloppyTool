@@ -61,6 +61,20 @@
 tab: HardwareTab
 provider_source: self->currentProviderV2()
 
+# Headers the generated TU needs in addition to wiring_runtime.h:
+#   hardwaretab.h         — HardwareTab class (declares ui-pointer + handler
+#                           overloads + friend declaration for the
+#                           generated function)
+#   ui_tab_hardware.h     — uic-generated complete type for Ui::TabHardware
+#                           (the .ui's `<class>` is `TabHardware`, hence the
+#                           filename pattern from qmake's UIC step)
+#   greaseweazle_provider_v2.h — concrete V2 type for the wire_action<Cap>
+#                                instantiations against GW
+extra_includes:
+  - hardwaretab.h
+  - ui_tab_hardware.h
+  - hardware_providers/greaseweazle_provider_v2.h
+
 actions:
 
   # ── Motor control ──────────────────────────────────────────────────

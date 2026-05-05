@@ -160,6 +160,49 @@ def main() -> int:
         return 1
     print(f"  ok [production] {rc.stdout.strip()}")
 
+    # Case 6 — committed generated/tab_hardware_wiring.gen.cpp must match a
+    # fresh regeneration. CI gate: if a developer modifies the YAML or the
+    # codegen but forgets to rerun the generator and commit the new output,
+    # this test catches it before the build does.
+    #
+    # We run the codegen with cwd=REPO and RELATIVE input paths — the same
+    # way a developer would invoke it from the project root — so the input-
+    # path comments emitted into the file match the committed copy verbatim.
+    print("[run_tests] case 6: generated/tab_hardware_wiring.gen.cpp is fresh")
+    committed = REPO / "generated" / "tab_hardware_wiring.gen.cpp"
+    if not committed.is_file():
+        print(f"FAIL [generated-fresh] committed file missing: {committed}")
+        return 1
+    with tempfile.TemporaryDirectory() as tmp:
+        regen = Path(tmp) / "regen.gen.cpp"
+        rc = subprocess.run(
+            [
+                sys.executable,
+                str(CODEGEN),
+                "--ui", "forms/tab_hardware.ui",
+                "--actions", "forms/tab_hardware.actions.yaml",
+                "--output", str(regen),
+            ],
+            cwd=str(REPO),
+            capture_output=True,
+            text=True,
+        )
+        if rc.returncode != 0:
+            print(f"FAIL [generated-fresh] regeneration exit={rc.returncode}")
+            print(rc.stderr)
+            return 1
+        a = committed.read_text(encoding="utf-8")
+        b = regen.read_text(encoding="utf-8")
+        if a != b:
+            print("FAIL [generated-fresh] committed file is stale.")
+            print(f"  Run: python3 tools/wiring_codegen.py "
+                  f"--ui forms/tab_hardware.ui "
+                  f"--actions forms/tab_hardware.actions.yaml "
+                  f"--output generated/tab_hardware_wiring.gen.cpp")
+            print(f"  Then: git add generated/tab_hardware_wiring.gen.cpp")
+            return 1
+        print("  ok [generated-fresh] committed output is byte-identical to regen")
+
     print("[run_tests] all green.")
     return 0
 

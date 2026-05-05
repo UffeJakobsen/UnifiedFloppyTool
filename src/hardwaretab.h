@@ -19,15 +19,47 @@
 #include <QTimer>
 #include <QButtonGroup>
 
+#include <memory>
+
+#include "uft/hal/outcomes.h"   /* forensic Sum-Types — handlers take refs */
+
 namespace Ui { class TabHardware; }
 
-class HardwareManager;        /* see src/hardware_providers/hardwaremanager.h */
+class HardwareTab;              /* fwd-decl needed before the codegen
+                                 * namespace below references it */
+class HardwareManager;          /* see src/hardware_providers/hardwaremanager.h */
 struct DetectedDriveInfo;
 struct HardwareInfo;
+
+/* MF-157 — see src/hardware_providers/greaseweazle_provider_v2.h.
+ * The V2 type lives in `uft::hal` (not the global namespace), so the
+ * forward declaration must enter the right namespace. */
+namespace uft::hal { class GreaseweazleProviderV2; }
+
+/* MF-157 (P1.4): forward-declaration of the codegen-emitted wire-up
+ * function. Implemented in generated/tab_hardware_wiring.gen.cpp (output
+ * of tools/wiring_codegen.py from forms/tab_hardware.actions.yaml +
+ * forms/tab_hardware.ui). The function needs deep access to HardwareTab's
+ * private ui-pointer and the GreaseweazleProviderV2 instance — granted
+ * via a friend declaration on the class below.
+ *
+ * `::HardwareTab` is fully qualified so the parameter type cannot be
+ * mistaken for a fwd-decl into `uft::gui::generated::`. */
+namespace uft::gui::generated {
+    void wire_hardware_tab(::HardwareTab *self);
+}
 
 class HardwareTab : public QWidget
 {
     Q_OBJECT
+
+    /* MF-157 (P1.4): the codegen-emitted wire-up function needs to reach
+     * `ui->btnX` (private), `m_gwProviderV2` (private), and the public
+     * handler overload set declared below. Granting friendship to that
+     * one function is preferable to making `ui` public — the deep access
+     * stays narrowly scoped to one auto-generated translation unit that
+     * lives in `generated/`. */
+    friend void ::uft::gui::generated::wire_hardware_tab(::HardwareTab *self);
 
 public:
     explicit HardwareTab(QWidget *parent = nullptr);
@@ -54,6 +86,60 @@ public:
     QString getFirmwareVersion() const { return m_firmwareVersion; }
     QString getPortName() const { return m_portName; }
     int getHardwareModel() const { return m_hwModel; }
+
+    /* ──────────────────────────────────────────────────────────────────
+     *  MF-157 (P1.4) — Type-Driven HAL V2 surface
+     *
+     *  `currentProviderV2()` is the single accessor consumed by the
+     *  codegen-emitted `wire_hardware_tab(self)` (see
+     *  `forms/tab_hardware.actions.yaml`'s `provider_source:` entry).
+     *  It returns the GreaseweazleProviderV2 instance when the GW
+     *  controller is connected, and nullptr otherwise.
+     *
+     *  The handler overload set below is invoked by the codegen-emitted
+     *  std::visit dispatch (one overload per variant alternative). Each
+     *  handler is RESPONSIBLE for surfacing the forensic detail of its
+     *  variant — never collapse `SectorMarginal`'s divergent_reads to a
+     *  single sample (rule F-3), never reduce ProviderError to one line
+     *  (rule F-4 — what / why / fix all surfaced).
+     *
+     *  Adding a new alternative to a Sum-Type in `outcomes.h` will fail
+     *  to compile here until a matching overload is added. That is the
+     *  forensic contract turning "we should preserve every case" into a
+     *  build break.
+     * ────────────────────────────────────────────────────────────────── */
+    ::uft::hal::GreaseweazleProviderV2 *currentProviderV2() const noexcept;
+
+    /* MotorOutcome variant — one overload per alternative (excl. shared
+     * ProviderError / HardwareDisconnected / CapabilityRequiresPolicy
+     * which are routed through the show* methods further below). */
+    void onMotorOutcome(const ::uft::hal::MotorRunning &v);
+    void onMotorOutcome(const ::uft::hal::MotorStopped &v);
+    void onMotorOutcome(const ::uft::hal::MotorStalled &v);
+
+    /* SeekOutcome variant. */
+    void onSeekOutcome(const ::uft::hal::SeekArrived &v);
+    void onSeekOutcome(const ::uft::hal::SeekOvershot &v);
+    void onSeekOutcome(const ::uft::hal::SeekTrack0Failed &v);
+
+    /* RpmOutcome variant. */
+    void onRpmOutcome(const ::uft::hal::RpmMeasured &v);
+
+    /* DetectOutcome variant. */
+    void onDetectOutcome(const ::uft::hal::DriveDetected &v);
+    void onDetectOutcome(const ::uft::hal::DriveAbsent &v);
+
+    /* FluxOutcome variant. */
+    void onFluxOutcome(const ::uft::hal::FluxCaptured &v);
+    void onFluxOutcome(const ::uft::hal::FluxMarginal &v);
+    void onFluxOutcome(const ::uft::hal::FluxUnreadable &v);
+
+    /* Cross-variant alternatives — every Outcome variant carries these
+     * three. Single implementation each (F-4 enforced — what/why/fix
+     * surfaced verbatim). */
+    void showProviderError(const ::uft::hal::ProviderError &e);
+    void showHardwareDisconnected(const ::uft::hal::HardwareDisconnected &d);
+    void showPolicyRequired(const ::uft::hal::CapabilityRequiresPolicy &p);
 
 signals:
     void connectionChanged(bool connected);
@@ -169,7 +255,22 @@ private:
      * DTC subprocess, SCP serial, Applesauce serial, FC5025 USB,
      * XUM1541 USB, ADF-Copy serial, USB-Floppy SG_IO). */
     HardwareManager *m_hwManager;
-    
+
+    /* MF-157 (P1.4): V2 mixin-composition wrapper around the C-HAL
+     * Greaseweazle handle (m_gwDevice). Created on connect, reset on
+     * disconnect. The forward-declared dtor in greaseweazle_provider_v2.h
+     * is sufficient for unique_ptr's destructor instantiation here
+     * because HardwareTab's destructor is defined in hardwaretab.cpp
+     * where the V2 type is complete. */
+    std::unique_ptr<::uft::hal::GreaseweazleProviderV2> m_gwProviderV2;
+
+    /* Re-runs `wire_hardware_tab(this)` so Phase-1 disconnect, Phase-2
+     * disable, and Phase-3 wire-up reflect the current `currentProviderV2()`.
+     * Called from `setupConnections()` (initial), `onConnect()` (after the
+     * V2 wrapper is created), and `onDisconnect()` (before/after the
+     * V2 wrapper is destroyed). */
+    void rewireV2();
+
     // Detected drive info
     QString m_detectedModel;
     int m_detectedTracks;
