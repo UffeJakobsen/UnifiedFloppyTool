@@ -63,6 +63,25 @@ P0 headers must not be edited during P1.
 
 ---
 
+## P3 — Tester-Strategie (parallel zu P1 möglich, Pflicht vor v5.0.0)
+
+Spec: [`docs/TESTER_STRATEGY.md`](TESTER_STRATEGY.md). Doppelziel
+"GW-kompatibel + beweisbar besser" über 7-Schichten-Testsystem. P3.1
+ist die einzige Welle-1-Aufgabe ohne Abhängigkeit zu P1.
+
+| ID    | Task                                                                       | Depends on | Status |
+|-------|----------------------------------------------------------------------------|------------|--------|
+| P3.1  | `gw_corpus/` Skeleton + `tools/uft_diff_test/` + 1 SCP-Fixture + DIV-001  | —          | ⬜     |
+| P3.2  | Differential-Conformance-Tests pro GW-Command (~50 Tests)                  | P3.1, P1   | ⬜     |
+| P3.3  | Improvement-Tests: forensic, multi_device, gui (~40 Tests)                 | P3.1, P1   | ⬜     |
+| P3.4  | HIL-Skript + Golden-Reference-Katalog + erster v5.0.0-rc1 HIL-Report      | P3.2, P3.3 | ⬜     |
+
+Neue Subagenten (landen mit P3.1):
+- `differential-test-author` (Sonnet) — pro GW-Command/Format
+- `improvement-test-author` (Sonnet) — pro DESIGN_PRINCIPLES-Eigenschaft
+
+---
+
 ## STOP conditions
 
 The agent (human or AI) MUST halt and ask before continuing if any of
