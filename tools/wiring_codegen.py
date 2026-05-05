@@ -407,13 +407,26 @@ def main(argv: list[str]) -> int:
     )
     p.add_argument("--ui", type=Path, required=True, help="Qt Designer .ui file")
     p.add_argument("--actions", type=Path, required=True, help="*.actions.yaml")
-    p.add_argument("--output", type=Path, required=True, help="output .gen.cpp")
+    p.add_argument(
+        "--output",
+        type=Path,
+        required=False,
+        default=None,
+        help="output .gen.cpp (required unless --check is given)",
+    )
     p.add_argument(
         "--check",
         action="store_true",
         help="validate inputs without writing output (CI gate)",
     )
     args = p.parse_args(argv)
+    if not args.check and args.output is None:
+        fail(
+            "--output is required when --check is not given",
+            "the codegen needs to know where to emit the .gen.cpp",
+            "pass --output <path> or use --check to validate without writing",
+            2,
+        )
 
     for arg_name, path in (("ui", args.ui), ("actions", args.actions)):
         if not path.is_file():

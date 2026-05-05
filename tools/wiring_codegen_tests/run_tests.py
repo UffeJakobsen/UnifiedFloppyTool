@@ -129,6 +129,37 @@ def main() -> int:
             return 1
         print("  ok [idempotence] byte-identical across runs")
 
+    # Case 5 — production YAML must validate (CI gate for H-3 / H-4 drift).
+    # If someone renames a widget in forms/tab_hardware.ui or removes a
+    # concept from include/uft/hal/concepts.h without updating the YAML or
+    # KNOWN_CAPABILITIES, this gate catches it before the C++ build does.
+    print("[run_tests] case 5: production forms/tab_hardware.actions.yaml validates")
+    prod_yaml = REPO / "forms" / "tab_hardware.actions.yaml"
+    prod_ui = REPO / "forms" / "tab_hardware.ui"
+    if not prod_yaml.is_file() or not prod_ui.is_file():
+        print(f"FAIL [production] missing input(s):"
+              f" yaml_exists={prod_yaml.is_file()} ui_exists={prod_ui.is_file()}")
+        return 1
+    rc = subprocess.run(
+        [
+            sys.executable,
+            str(CODEGEN),
+            "--ui",
+            str(prod_ui),
+            "--actions",
+            str(prod_yaml),
+            "--check",
+        ],
+        capture_output=True,
+        text=True,
+    )
+    if rc.returncode != 0:
+        print(f"FAIL [production] codegen --check exit={rc.returncode}")
+        print("stdout:", rc.stdout)
+        print("stderr:", rc.stderr)
+        return 1
+    print(f"  ok [production] {rc.stdout.strip()}")
+
     print("[run_tests] all green.")
     return 0
 
