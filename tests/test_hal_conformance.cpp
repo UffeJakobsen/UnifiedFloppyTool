@@ -85,10 +85,11 @@
 
 /* ──────────────────────────────────────────────────────────────────────
  *  Provider includes — extend as P1.7+ land.
- *  CMakeLists adds ${CMAKE_SOURCE_DIR}/src to the include path for this
- *  test (see test_greaseweazle_v2 precedent).
+ *  CMakeLists adds ${CMAKE_SOURCE_DIR}/src and ${CMAKE_SOURCE_DIR}/tests
+ *  to the include path for this test.
  * ────────────────────────────────────────────────────────────────────── */
 #include "hardware_providers/greaseweazle_provider_v2.h"
+#include "mock_provider_v2.h"           /* MF-160 P1.7 */
 
 namespace uft::tests::conformance {
 
@@ -121,6 +122,23 @@ struct factory<::uft::hal::GreaseweazleProviderV2> {
     static ::uft::hal::GreaseweazleProviderV2 make() {
         return ::uft::hal::GreaseweazleProviderV2(nullptr);
     }
+};
+
+template<>
+struct factory<::uft::tests::MockProviderV2> {
+    /* P1.7: default-constructed MockProviderV2 reports a healthy drive
+     * on every capability — the success-shape variant per Outcome
+     * (SectorRead, FluxCaptured, MotorRunning, …). This is the
+     * counterpart to GW-with-NULL-handle: GW exercises the
+     * ProviderError arm, MockProviderV2 exercises the happy arm. Both
+     * runs together exhaust the meaningful invariant surface for the
+     * concept set today.
+     *
+     * Per-alternative coverage (SectorMarginal, WriteVerifyFailed, …)
+     * lives in test_mock_provider_v2.cpp — the conformance harness
+     * makes one call per concept; that file makes one call per
+     * (concept × variant alternative). */
+    static ::uft::tests::MockProviderV2 make() { return {}; }
 };
 
 /* ════════════════════════════════════════════════════════════════════════
@@ -514,7 +532,7 @@ int main()
     using namespace uft::tests::conformance;
 
     run_conformance<::uft::hal::GreaseweazleProviderV2>("GreaseweazleProviderV2");
-    /* P1.7 will add: run_conformance<MockProviderV2>("MockProviderV2"); */
+    run_conformance<::uft::tests::MockProviderV2>("MockProviderV2");  /* MF-160 P1.7 */
     /* P1.8+ will add: SCPProviderV2, KryoFluxProviderV2, ...           */
 
     const auto &s = stats();

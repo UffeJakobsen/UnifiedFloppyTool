@@ -31,7 +31,8 @@ set(_HEADER_ONLY_CPP_TESTS
     "${CMAKE_CURRENT_SOURCE_DIR}/test_hal_foundation.cpp"     # MF-150
     "${CMAKE_CURRENT_SOURCE_DIR}/test_greaseweazle_v2.cpp"    # MF-154 P1.1
     "${CMAKE_CURRENT_SOURCE_DIR}/test_hal_conformance.cpp"    # MF-158 P1.5
-    "${CMAKE_CURRENT_SOURCE_DIR}/test_mock_hardware.cpp")     # MF-159 P1.6
+    "${CMAKE_CURRENT_SOURCE_DIR}/test_mock_hardware.cpp"      # MF-159 P1.6
+    "${CMAKE_CURRENT_SOURCE_DIR}/test_mock_provider_v2.cpp")  # MF-160 P1.7
 
 set(TEST_SOURCES ${TEST_SOURCES_C} ${_HEADER_ONLY_CPP_TESTS})
 
@@ -263,16 +264,25 @@ foreach(test_source ${TEST_SOURCES})
             ${CMAKE_SOURCE_DIR}/src)
         set(TEST_LIBS "")
     elseif(${test_name} STREQUAL "test_hal_conformance")
-        # MF-158 P1.5: HAL conformance harness — runs every concept's
-        # SECTION against every V2 provider in the typelist (today: GW
-        # with NULL handle; P1.7+ extends with MockProviderV2 etc.).
-        # Same dependency surface as test_greaseweazle_v2 since GW is the
-        # only V2 in the typelist for now.
+        # MF-158 P1.5 + MF-160 P1.7: HAL conformance harness — runs every
+        # concept's SECTION against every V2 provider in the typelist
+        # (GW with NULL handle + MockProviderV2 in default-healthy mode).
         target_sources(${test_name} PRIVATE
             ${CMAKE_SOURCE_DIR}/src/hardware_providers/greaseweazle_provider_v2.cpp
-            ${CMAKE_SOURCE_DIR}/src/hal/uft_greaseweazle_full.c)
+            ${CMAKE_SOURCE_DIR}/src/hal/uft_greaseweazle_full.c
+            ${CMAKE_SOURCE_DIR}/tests/mock_provider_v2.cpp)
         target_include_directories(${test_name} PRIVATE
-            ${CMAKE_SOURCE_DIR}/src)
+            ${CMAKE_SOURCE_DIR}/src
+            ${CMAKE_SOURCE_DIR}/tests)
+        set(TEST_LIBS "")
+    elseif(${test_name} STREQUAL "test_mock_provider_v2")
+        # MF-160 P1.7: per-variant exhaustive coverage for MockProviderV2.
+        # Self-contained — only needs the mock TU + tests/ on the
+        # include path so #include "mock_provider_v2.h" resolves.
+        target_sources(${test_name} PRIVATE
+            ${CMAKE_SOURCE_DIR}/tests/mock_provider_v2.cpp)
+        target_include_directories(${test_name} PRIVATE
+            ${CMAKE_SOURCE_DIR}/tests)
         set(TEST_LIBS "")
     elseif(${test_name} STREQUAL "test_gw_protocol")
         # MF-135: GW protocol regression tests need uft_gw_strerror() +
