@@ -33,8 +33,9 @@ set(_HEADER_ONLY_CPP_TESTS
     "${CMAKE_CURRENT_SOURCE_DIR}/test_hal_conformance.cpp"    # MF-158 P1.5
     "${CMAKE_CURRENT_SOURCE_DIR}/test_mock_hardware.cpp"      # MF-159 P1.6
     "${CMAKE_CURRENT_SOURCE_DIR}/test_mock_provider_v2.cpp"   # MF-160 P1.7
-    "${CMAKE_CURRENT_SOURCE_DIR}/test_scp_provider_v2.cpp"     # MF-161 P1.8
-    "${CMAKE_CURRENT_SOURCE_DIR}/test_kryoflux_provider_v2.cpp") # MF-162 P1.9
+    "${CMAKE_CURRENT_SOURCE_DIR}/test_scp_provider_v2.cpp"         # MF-161 P1.8
+    "${CMAKE_CURRENT_SOURCE_DIR}/test_kryoflux_provider_v2.cpp"   # MF-162 P1.9
+    "${CMAKE_CURRENT_SOURCE_DIR}/test_fluxengine_provider_v2.cpp") # MF-163 P1.10
 
 set(TEST_SOURCES ${TEST_SOURCES_C} ${_HEADER_ONLY_CPP_TESTS})
 
@@ -284,8 +285,18 @@ foreach(test_source ${TEST_SOURCES})
             ${CMAKE_SOURCE_DIR}/src
             ${CMAKE_SOURCE_DIR}/tests)
         set(TEST_LIBS "")
+    elseif(${test_name} STREQUAL "test_fluxengine_provider_v2")
+        # MF-163 P1.10: FluxEngineProviderV2 mixin composition test.
+        # Needs: V2 provider .cpp; no C-HAL backend (FE uses fluxengine subprocess).
+        # SubprocessMock is header-only; tests/ must be on the include path.
+        target_sources(${test_name} PRIVATE
+            ${CMAKE_SOURCE_DIR}/src/hardware_providers/fluxengine_provider_v2.cpp)
+        target_include_directories(${test_name} PRIVATE
+            ${CMAKE_SOURCE_DIR}/src
+            ${CMAKE_SOURCE_DIR}/tests)
+        set(TEST_LIBS "")
     elseif(${test_name} STREQUAL "test_hal_conformance")
-        # MF-158 P1.5 + MF-160 P1.7 + MF-161 P1.8 + MF-162 P1.9:
+        # MF-158 P1.5 + MF-160 P1.7 + MF-161 P1.8 + MF-162 P1.9 + MF-163 P1.10:
         # HAL conformance harness — runs every concept's SECTION against
         # every V2 provider in the typelist.
         target_sources(${test_name} PRIVATE
@@ -294,6 +305,7 @@ foreach(test_source ${TEST_SOURCES})
             ${CMAKE_SOURCE_DIR}/src/hardware_providers/scp_provider_v2.cpp
             ${CMAKE_SOURCE_DIR}/src/hal/uft_scp_direct.c
             ${CMAKE_SOURCE_DIR}/src/hardware_providers/kryoflux_provider_v2.cpp
+            ${CMAKE_SOURCE_DIR}/src/hardware_providers/fluxengine_provider_v2.cpp
             ${CMAKE_SOURCE_DIR}/tests/mock_provider_v2.cpp)
         target_include_directories(${test_name} PRIVATE
             ${CMAKE_SOURCE_DIR}/src

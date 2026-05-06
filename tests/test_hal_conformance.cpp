@@ -91,9 +91,10 @@
 #include "hardware_providers/greaseweazle_provider_v2.h"
 #include "hardware_providers/scp_provider_v2.h"          /* MF-161 P1.8 */
 #include "hardware_providers/kryoflux_provider_v2.h"     /* MF-162 P1.9 */
+#include "hardware_providers/fluxengine_provider_v2.h"   /* MF-163 P1.10 */
 #include "mock_provider_v2.h"           /* MF-160 P1.7 */
 
-/* KryoFlux conformance factory needs SubprocessMock. */
+/* KryoFlux + FluxEngine conformance factories need SubprocessMock. */
 #include "mock_hardware/subprocess_mock.h"
 
 namespace uft::tests::conformance {
@@ -167,6 +168,33 @@ struct factory<::uft::hal::KryoFluxProviderV2> {
         };
         return ::uft::hal::KryoFluxProviderV2(
             std::move(failing_runner), "dtc");
+    }
+};
+
+template<>
+struct factory<::uft::hal::FluxEngineProviderV2> {
+    /* P1.10: a FluxEngineRunner that always returns exit_code=1 + stderr
+     * "fluxengine not found" exercises the FluxEngine V2's error path on every
+     * capability. This is forensically truthful: in CI there is no FluxEngine
+     * device and no fluxengine binary. All do_* methods return ProviderError,
+     * and we verify the F-4 3-part contract on the error-path side.
+     *
+     * When fluxengine integration is available (HIL environment), the factory
+     * can be switched to a real FluxEngineRunner and this SECTION will exercise
+     * the happy-path variants. For now, the error path covers the structural
+     * conformance surface. */
+    static ::uft::hal::FluxEngineProviderV2 make() {
+        auto failing_runner = [](const std::vector<std::string>&,
+                                 const std::string&)
+            -> ::uft::hal::FluxEngineRunResult {
+            return {
+                "",                            /* stdout_text */
+                "fluxengine: command not found", /* stderr_text */
+                1                              /* exit_code (failure) */
+            };
+        };
+        return ::uft::hal::FluxEngineProviderV2(
+            std::move(failing_runner), "fluxengine");
     }
 };
 
@@ -578,10 +606,11 @@ int main()
     using namespace uft::tests::conformance;
 
     run_conformance<::uft::hal::GreaseweazleProviderV2>("GreaseweazleProviderV2");
-    run_conformance<::uft::tests::MockProviderV2>("MockProviderV2");  /* MF-160 P1.7 */
-    run_conformance<::uft::hal::SCPProviderV2>("SCPProviderV2");           /* MF-161 P1.8 */
-    run_conformance<::uft::hal::KryoFluxProviderV2>("KryoFluxProviderV2"); /* MF-162 P1.9 */
-    /* P1.10+ will add: FluxEngineProviderV2, FC5025ProviderV2, ...        */
+    run_conformance<::uft::tests::MockProviderV2>("MockProviderV2");         /* MF-160 P1.7 */
+    run_conformance<::uft::hal::SCPProviderV2>("SCPProviderV2");             /* MF-161 P1.8 */
+    run_conformance<::uft::hal::KryoFluxProviderV2>("KryoFluxProviderV2");   /* MF-162 P1.9 */
+    run_conformance<::uft::hal::FluxEngineProviderV2>("FluxEngineProviderV2"); /* MF-163 P1.10 */
+    /* P1.11+ will add: FC5025ProviderV2, XUM1541ProviderV2, ...            */
 
     const auto &s = stats();
     std::printf("hal_conformance: %d sections run, %d failed\n",
