@@ -28,8 +28,9 @@ file(GLOB TEST_SOURCES_CPP  "${CMAKE_CURRENT_SOURCE_DIR}/test_*.cpp")
 # Header-only C++ tests that join the main C-loop (no Qt linking).
 # Add new entries here when introducing a header-only foundation test.
 set(_HEADER_ONLY_CPP_TESTS
-    "${CMAKE_CURRENT_SOURCE_DIR}/test_hal_foundation.cpp"   # MF-150
-    "${CMAKE_CURRENT_SOURCE_DIR}/test_greaseweazle_v2.cpp") # MF-154 P1.1
+    "${CMAKE_CURRENT_SOURCE_DIR}/test_hal_foundation.cpp"     # MF-150
+    "${CMAKE_CURRENT_SOURCE_DIR}/test_greaseweazle_v2.cpp"    # MF-154 P1.1
+    "${CMAKE_CURRENT_SOURCE_DIR}/test_hal_conformance.cpp")   # MF-158 P1.5
 
 set(TEST_SOURCES ${TEST_SOURCES_C} ${_HEADER_ONLY_CPP_TESTS})
 
@@ -254,6 +255,18 @@ foreach(test_source ${TEST_SOURCES})
     elseif(${test_name} STREQUAL "test_greaseweazle_v2")
         # MF-154 P1.1: GreaseweazleProviderV2 mixin composition test.
         # Needs: V2 provider .cpp + GW C backend (for uft_gw_strerror etc.).
+        target_sources(${test_name} PRIVATE
+            ${CMAKE_SOURCE_DIR}/src/hardware_providers/greaseweazle_provider_v2.cpp
+            ${CMAKE_SOURCE_DIR}/src/hal/uft_greaseweazle_full.c)
+        target_include_directories(${test_name} PRIVATE
+            ${CMAKE_SOURCE_DIR}/src)
+        set(TEST_LIBS "")
+    elseif(${test_name} STREQUAL "test_hal_conformance")
+        # MF-158 P1.5: HAL conformance harness — runs every concept's
+        # SECTION against every V2 provider in the typelist (today: GW
+        # with NULL handle; P1.7+ extends with MockProviderV2 etc.).
+        # Same dependency surface as test_greaseweazle_v2 since GW is the
+        # only V2 in the typelist for now.
         target_sources(${test_name} PRIVATE
             ${CMAKE_SOURCE_DIR}/src/hardware_providers/greaseweazle_provider_v2.cpp
             ${CMAKE_SOURCE_DIR}/src/hal/uft_greaseweazle_full.c)
