@@ -44,7 +44,7 @@ P0 headers must not be edited during P1.
 | P1.12 | `XUM1541ProviderV2` (Read+Write sector via opencbm)                        | P1.6       | ✅ MF-165 |
 | P1.13 | `ApplesauceProviderV2` (Read+Write flux via QSerialPort)                   | P1.6       | ✅ MF-166 |
 | P1.14 | `ADFCopyProviderV2` (Read+Write flux via QSerialPort)                      | P1.6       | ✅ MF-167 |
-| P1.15 | `USBFloppyProviderV2` (Read+Write sector via UFI HAL)                      | P1.6       | ⬜     |
+| P1.15 | `USBFloppyProviderV2` (Read+Write sector via UFI HAL)                      | P1.6       | ✅ MF-168 |
 | P1.16 | DTO migration: `if (r.success)` → `std::visit` in jobs + tabs              | P1.1–1.15  | ⬜     |
 | P1.17 | Drop V1 base class + 10 V1 provider files                                  | P1.16      | ⬜     |
 | P1.18 | Internalize `uft_gw_*` — out of `hardwaretab.cpp`, only in GW provider     | P1.4, P1.17| ⬜     |

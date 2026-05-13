@@ -48,9 +48,9 @@
  *                    of every variant (SectorRead, FluxCaptured, …) so
  *                    the framework's per-alternative invariants get
  *                    real coverage.
- * P1.8+ will add : SCPProviderV2, KryoFluxProviderV2, FluxEngineProviderV2,
+ * P1.8+ added  : SCPProviderV2, KryoFluxProviderV2, FluxEngineProviderV2,
  *                    FC5025ProviderV2, XUM1541ProviderV2, ApplesauceProviderV2,
- *                    ADFCopyProviderV2, USBFloppyProviderV2 — each
+ *                    ADFCopyProviderV2, USBFloppyProviderV2 (P1.15) — each
  *                    backed by a mock from `tests/mock_hardware/` (P1.6).
  *
  * EXTENSION CONTRACT (rule for new concepts and new providers)
@@ -95,7 +95,8 @@
 #include "hardware_providers/fc5025_provider_v2.h"       /* MF-164 P1.11 */
 #include "hardware_providers/xum1541_provider_v2.h"      /* MF-165 P1.12 */
 #include "hardware_providers/applesauce_provider_v2.h"  /* MF-166 P1.13 */
-#include "hardware_providers/adfcopy_provider_v2.h"   /* MF-167 P1.14 */
+#include "hardware_providers/adfcopy_provider_v2.h"      /* MF-167 P1.14 */
+#include "hardware_providers/usbfloppy_provider_v2.h"  /* MF-168 P1.15 */
 #include "mock_provider_v2.h"           /* MF-160 P1.7 */
 
 /* KryoFlux + FluxEngine conformance factories need SubprocessMock. */
@@ -380,6 +381,50 @@ struct factory<::uft::hal::ADFCopyProviderV2> {
             std::move(unavail_seek),
             std::move(unavail_recal),
             std::move(unavail_detect));
+    }
+};
+
+template<>
+struct factory<::uft::hal::USBFloppyProviderV2> {
+    /* P1.15: a read runner returning backend_unavailable=true exercises the
+     * USB Floppy V2's error path on every read capability. A write runner
+     * returning backend_unavailable=true exercises the write error path.
+     * A detect runner returning found=false with no error_message exercises
+     * the DriveAbsent path (clean probe, device absent — like in CI where
+     * no USB floppy drive is attached).
+     *
+     * This is forensically truthful: in CI there is no USB floppy drive.
+     * All do_* methods return ProviderError or DriveAbsent, and we verify
+     * the F-4 3-part contract and the DriveAbsent audit-trail invariant.
+     *
+     * When a real USB floppy drive is available (HIL environment), the factory
+     * can be switched to real runner lambdas wrapping the UFI C-HAL and this
+     * SECTION will exercise the happy-path variants. For now, the error path
+     * covers the structural conformance surface. */
+    static ::uft::hal::USBFloppyProviderV2 make() {
+        auto failing_read = [](const ::uft::hal::UsbFloppyReadRequest&)
+            -> ::uft::hal::UsbFloppyReadResult {
+            ::uft::hal::UsbFloppyReadResult r;
+            r.backend_unavailable = true;
+            return r;
+        };
+        auto failing_write = [](const ::uft::hal::UsbFloppyWriteRequest&)
+            -> ::uft::hal::UsbFloppyWriteResult {
+            ::uft::hal::UsbFloppyWriteResult r;
+            r.backend_unavailable = true;
+            return r;
+        };
+        auto absent_detect = []() -> ::uft::hal::UsbFloppyDetectResult {
+            ::uft::hal::UsbFloppyDetectResult r;
+            r.found = false;
+            /* No error_message: clean probe, device simply absent (no USB floppy). */
+            return r;
+        };
+        return ::uft::hal::USBFloppyProviderV2(
+            std::move(failing_read),
+            std::move(failing_write),
+            std::move(absent_detect),
+            "" /* no device path in CI */);
     }
 };
 
@@ -798,8 +843,8 @@ int main()
     run_conformance<::uft::hal::FC5025ProviderV2>("FC5025ProviderV2");       /* MF-164 P1.11 */
     run_conformance<::uft::hal::XUM1541ProviderV2>("XUM1541ProviderV2");       /* MF-165 P1.12 */
     run_conformance<::uft::hal::ApplesauceProviderV2>("ApplesauceProviderV2"); /* MF-166 P1.13 */
-    run_conformance<::uft::hal::ADFCopyProviderV2>("ADFCopyProviderV2");     /* MF-167 P1.14 */
-    /* P1.15+ will add: USBFloppyProviderV2, ...                              */
+    run_conformance<::uft::hal::ADFCopyProviderV2>("ADFCopyProviderV2");        /* MF-167 P1.14 */
+    run_conformance<::uft::hal::USBFloppyProviderV2>("USBFloppyProviderV2");  /* MF-168 P1.15 */
 
     const auto &s = stats();
     std::printf("hal_conformance: %d sections run, %d failed\n",

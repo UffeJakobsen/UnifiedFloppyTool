@@ -39,7 +39,8 @@ set(_HEADER_ONLY_CPP_TESTS
     "${CMAKE_CURRENT_SOURCE_DIR}/test_fc5025_provider_v2.cpp"      # MF-164 P1.11
     "${CMAKE_CURRENT_SOURCE_DIR}/test_xum1541_provider_v2.cpp"        # MF-165 P1.12
     "${CMAKE_CURRENT_SOURCE_DIR}/test_applesauce_provider_v2.cpp"   # MF-166 P1.13
-    "${CMAKE_CURRENT_SOURCE_DIR}/test_adfcopy_provider_v2.cpp")    # MF-167 P1.14
+    "${CMAKE_CURRENT_SOURCE_DIR}/test_adfcopy_provider_v2.cpp"     # MF-167 P1.14
+    "${CMAKE_CURRENT_SOURCE_DIR}/test_usbfloppy_provider_v2.cpp") # MF-168 P1.15
 
 set(TEST_SOURCES ${TEST_SOURCES_C} ${_HEADER_ONLY_CPP_TESTS})
 
@@ -342,9 +343,25 @@ foreach(test_source ${TEST_SOURCES})
             ${CMAKE_SOURCE_DIR}/src
             ${CMAKE_SOURCE_DIR}/tests)
         set(TEST_LIBS "")
+    elseif(${test_name} STREQUAL "test_usbfloppy_provider_v2")
+        # MF-168 P1.15: USBFloppyProviderV2 mixin composition test.
+        # Needs: V2 provider .cpp + UFI C-HAL (ufi.c) for the type definitions
+        # and UFT_E_GENERIC alias. No Qt dependency — transport is abstracted
+        # via injectable runners; tests inject scripted lambda runners directly.
+        # ufi.c is included so the linker resolves uft_ufi_* symbols that the
+        # production runner template references (even though tests never call
+        # them — the .cpp links cleanly without an OS backend registered).
+        target_sources(${test_name} PRIVATE
+            ${CMAKE_SOURCE_DIR}/src/hardware_providers/usbfloppy_provider_v2.cpp
+            ${CMAKE_SOURCE_DIR}/src/hal/ufi.c)
+        target_include_directories(${test_name} PRIVATE
+            ${CMAKE_SOURCE_DIR}/src
+            ${CMAKE_SOURCE_DIR}/tests)
+        set(TEST_LIBS "")
     elseif(${test_name} STREQUAL "test_hal_conformance")
         # MF-158 P1.5 + MF-160 P1.7 + MF-161 P1.8 + MF-162 P1.9 + MF-163 P1.10
-        # + MF-164 P1.11 + MF-165 P1.12 + MF-166 P1.13 + MF-167 P1.14:
+        # + MF-164 P1.11 + MF-165 P1.12 + MF-166 P1.13 + MF-167 P1.14
+        # + MF-168 P1.15:
         # HAL conformance harness — runs every concept's SECTION against
         # every V2 provider in the typelist.
         target_sources(${test_name} PRIVATE
@@ -358,6 +375,8 @@ foreach(test_source ${TEST_SOURCES})
             ${CMAKE_SOURCE_DIR}/src/hardware_providers/xum1541_provider_v2.cpp
             ${CMAKE_SOURCE_DIR}/src/hardware_providers/applesauce_provider_v2.cpp
             ${CMAKE_SOURCE_DIR}/src/hardware_providers/adfcopy_provider_v2.cpp
+            ${CMAKE_SOURCE_DIR}/src/hardware_providers/usbfloppy_provider_v2.cpp
+            ${CMAKE_SOURCE_DIR}/src/hal/ufi.c
             ${CMAKE_SOURCE_DIR}/tests/mock_provider_v2.cpp)
         target_include_directories(${test_name} PRIVATE
             ${CMAKE_SOURCE_DIR}/src
