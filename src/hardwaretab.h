@@ -201,8 +201,9 @@ private:
     void setupConnections();
     void setupButtonGroups();
     void detectSerialPorts();
-    void detectParallelPorts();
-    
+    /* MF-170 (P1.19): `detectParallelPorts()` removed with the X1541
+     * family — no parallel-port path remains in the new architecture. */
+
     // Controller list management
     void populateControllerList();
     void updateControllerListForRole();

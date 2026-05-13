@@ -289,15 +289,16 @@ void HardwareTab::populateControllerList()
     ui->comboController->addItem(tr("── Commodore USB ──"), "separator_cbm_usb");
     ui->comboController->addItem(tr("ZoomFloppy"), "zoomfloppy");
     ui->comboController->addItem(tr("XUM1541 / XUM1541-II"), "xum1541");
-    
-    // === Legacy Parallel Port (X1541 Series) ===
-    ui->comboController->addItem(tr("── Commodore LPT (Legacy) ──"), "separator_cbm_lpt");
-    ui->comboController->addItem(tr("XA1541 (Active Cable)"), "xa1541");
-    ui->comboController->addItem(tr("XAP1541 (Active + Parallel)"), "xap1541");
-    ui->comboController->addItem(tr("XM1541 (Multitask)"), "xm1541");
-    ui->comboController->addItem(tr("XE1541 (Extended)"), "xe1541");
-    ui->comboController->addItem(tr("X1541 (Original)"), "x1541");
-    
+
+    /* MF-170 (P1.19): legacy parallel-port X1541 family (XA/XAP/XM/XE/
+     * X1541) removed from the controller combo. The five entries had
+     * NO matching HardwareProvider class — they were structurally
+     * phantom-features that surfaced a "Backend not yet wired"
+     * messagebox on Connect. Parallel-port adapters are unreachable
+     * on modern desktops anyway; the USB-based XUM1541 / ZoomFloppy
+     * above is the only supported Commodore bridge today, and its V2
+     * provider (P1.12) passes the 65-section conformance harness. */
+
     // USB Floppy - only for Destination mode
     if (m_controllerRole == RoleDestination) {
         ui->comboController->addItem(tr("── Standard USB ──"), "separator_usb");
@@ -508,62 +509,11 @@ void HardwareTab::detectSerialPorts()
     }
 }
 
-void HardwareTab::detectParallelPorts()
-{
-    ui->comboPort->clear();
-    
-#ifdef Q_OS_LINUX
-    // Check for /dev/parportX devices on Linux
-    QStringList parports;
-    for (int i = 0; i < 4; i++) {
-        QString devPath = QString("/dev/parport%1").arg(i);
-        QFileInfo fi(devPath);
-        if (fi.exists()) {
-            parports << devPath;
-        }
-    }
-    
-    // Also check for /dev/lp devices
-    for (int i = 0; i < 4; i++) {
-        QString devPath = QString("/dev/lp%1").arg(i);
-        QFileInfo fi(devPath);
-        if (fi.exists() && !parports.contains(QString("/dev/parport%1").arg(i))) {
-            parports << devPath;
-        }
-    }
-    
-    // Add standard LPT addresses
-    QStringList stdPorts = {"LPT1 (0x378)", "LPT2 (0x278)", "LPT3 (0x3BC)"};
-    QStringList stdAddrs = {"0x378", "0x278", "0x3BC"};
-    
-    if (parports.isEmpty()) {
-        // No /dev/parport found, show standard addresses
-        for (int i = 0; i < stdPorts.size(); i++) {
-            ui->comboPort->addItem(stdPorts[i], stdAddrs[i]);
-        }
-    } else {
-        for (const QString& port : parports) {
-            ui->comboPort->addItem(port, port);
-        }
-    }
-#endif
-
-#ifdef Q_OS_WIN
-    // Windows parallel ports
-    ui->comboPort->addItem(tr("LPT1"), "LPT1");
-    ui->comboPort->addItem(tr("LPT2"), "LPT2");
-    ui->comboPort->addItem(tr("LPT3"), "LPT3");
-#endif
-    
-    if (ui->comboPort->count() == 0) {
-        ui->comboPort->addItem(tr("(No parallel port - use USB adapter)"), "");
-        ui->btnConnect->setEnabled(false);
-        updateStatus(tr("No parallel port found. Consider using ZoomFloppy or XUM1541 USB adapter."));
-    } else {
-        ui->btnConnect->setEnabled(true);
-        updateStatus(tr("Legacy X1541 mode - select parallel port."));
-    }
-}
+/* MF-170 (P1.19): `detectParallelPorts()` was the port-enumeration
+ * path for the X1541 family. With those controllers removed from the
+ * combo it has no callers and is deleted. The Qt-side LPT discovery
+ * logic (~/dev/parport*, ~/dev/lp*, Windows LPT1..3) lived only here
+ * and disappears with the function. */
 
 void HardwareTab::onRefreshPorts()
 {
@@ -654,31 +604,12 @@ void HardwareTab::onConnect()
      * serial, USB-Floppy SG_IO/UFI). Each provider already implements
      * detectDrive() / connect() / readTrack() with real I/O — they
      * just had no UI dispatcher routing to them before. */
-    /* MF-144 / HW-A: the X1541 legacy parallel-port family
-     * (xa1541 / xap1541 / xm1541 / xe1541 / x1541) is listed in the
-     * controller combo but has NO matching HardwareProvider class.
-     * Without this guard the request falls through HardwareManager's
-     * if/elseif chain to the final `else` branch, which silently
-     * instantiates a GreaseweazleHardwareProvider against the
-     * parallel-port hardware. That's the same identity-confusion
-     * class the audit (UFT-AUD-003) flagged for Pauline — wrong
-     * driver against real hardware, undefined behavior, potential
-     * data corruption. Reject explicitly with an actionable error. */
-    if (controller == "xa1541" || controller == "xap1541" ||
-        controller == "xm1541" || controller == "xe1541" ||
-        controller == "x1541") {
-        QMessageBox::information(this, tr("Backend not yet wired"),
-            tr("The %1 backend (X1541 legacy parallel-port adapter) "
-               "is not yet implemented in this build.\n\n"
-               "These adapters require a parallel-port driver which "
-               "isn't part of UFT v4.1.x. Use a USB-based Commodore "
-               "controller (XUM1541 / ZoomFloppy) for now. "
-               "X1541 family support is tracked in docs/MASTER_PLAN.md "
-               "(M3 milestone).")
-            .arg(m_controllerType));
-        updateStatus(tr("%1 not yet wired").arg(m_controllerType));
-        return;
-    }
+    /* MF-170 (P1.19): the X1541 family (xa1541/xap1541/xm1541/xe1541/
+     * x1541) was removed from `populateControllerList()` — the five
+     * combo entries had no matching provider class and only ever
+     * surfaced a "not yet wired" messagebox. With the entries gone
+     * the previous MF-144/HW-A reject guard here is unreachable and
+     * has been deleted. */
 
     if (controller != "greaseweazle") {
         /* MF-169 (P1.17): the V1 `HardwareManager` that used to dispatch
@@ -992,24 +923,20 @@ void HardwareTab::onControllerChanged(int index)
     // USB Floppy has different capabilities
     bool isUSB = (controller == "usb_floppy");
     
-    // Check if this is a Commodore controller
+    /* Check if this is a Commodore controller.
+     * MF-170 (P1.19): the LPT-based X1541 family was removed from the
+     * combo; `isCommodoreLPT` would always be false and is therefore
+     * gone. `isCommodore == isCommodoreUSB` now. */
     bool isCommodoreUSB = (controller == "zoomfloppy" || controller == "xum1541");
-    bool isCommodoreLPT = (controller == "xa1541" || controller == "xap1541" ||
-                          controller == "xm1541" || controller == "xe1541" ||
-                          controller == "x1541");
-    bool isCommodore = isCommodoreUSB || isCommodoreLPT;
+    bool isCommodore = isCommodoreUSB;
     bool isFlux = (controller == "greaseweazle" || controller == "scp" ||
                    controller == "kryoflux" || controller == "fluxengine");
-    
+
     // Disable flux-specific options for USB and Commodore
     ui->groupAdvanced->setEnabled(isFlux);
-    
+
     // Update port list based on controller type
-    if (isCommodoreLPT) {
-        // Show parallel ports for legacy X1541 cables
-        detectParallelPorts();
-        updateStatus(tr("Legacy LPT adapter selected - requires parallel port."));
-    } else if (isCommodoreUSB) {
+    if (isCommodoreUSB) {
         // Show USB devices for ZoomFloppy/XUM1541
         detectSerialPorts();
         updateStatus(tr("Commodore USB adapter selected - uses OpenCBM."));
