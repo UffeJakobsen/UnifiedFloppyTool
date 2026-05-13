@@ -66,20 +66,19 @@ Q_LOGGING_CATEGORY(lcHwSerial, "uft.hw.serial", QtWarningMsg)
 extern "C" {
 #include "uft/hal/uft_greaseweazle_full.h"
 }
-/* HAL-H7: Unified Capture — unified_hal_bridge.h pulls in Qt's
- * HardwareProvider (Q_OBJECT), so it lives OUTSIDE the extern "C" block. */
-#include <QPushButton>
-#include <QApplication>
-#include "hardware_providers/unified_hal_bridge.h"
 #endif
 
-/* MF-143: provider dispatcher (revived). HardwareManager owns one
- * provider at a time and routes setHardwareType() to the matching
- * concrete provider class. The previous code path bypassed this
- * (called uft_gw_open() directly) and the providers existed but
- * were never instantiated — that's what the audit flagged. */
-#include "hardware_providers/hardwaremanager.h"
-#include "hardware_providers/hardwareprovider.h"
+/* MF-169 (P1.17): the V1 hardware-provider hierarchy
+ * (`HardwareManager`, `HardwareProvider`, the 11 V1 provider classes,
+ * and `unified_hal_bridge`) was deleted in this commit. The single
+ * remaining hardware path is via the V2 mixin-composed providers
+ * (`*_provider_v2.{h,cpp}`). For Greaseweazle that path is wired
+ * end-to-end through `m_gwProviderV2` (MF-157 / P1.4); for the eight
+ * other controllers, the V2 wrappers exist but HardwareTab does not
+ * yet route to them — that is P1.18. Until then, selecting a
+ * non-Greaseweazle controller and pressing Connect surfaces a clear
+ * "no V2 routing wired" message rather than silently no-op'ing or
+ * mis-dispatching. */
 
 // ============================================================================
 // Construction / Destruction
@@ -98,7 +97,6 @@ HardwareTab::HardwareTab(QWidget *parent)
     , m_destIsHardware(true)
     , m_hwModel(0)
     , m_gwDevice(nullptr)
-    , m_hwManager(nullptr)
     , m_detectedTracks(0)
     , m_detectedHeads(0)
     , m_detectedRPM(0)
@@ -108,36 +106,12 @@ HardwareTab::HardwareTab(QWidget *parent)
 {
     ui->setupUi(this);
 
-    /* MF-143: instantiate the HW dispatcher up-front so detect-drive
-     * and connect routes can reach the chosen provider. The default
-     * provider is Greaseweazle (matches the live UI default and the
-     * pre-MF-132 behavior). Signals are forwarded to UI handlers
-     * lower in this constructor via setupConnections(). */
-    m_hwManager = new HardwareManager(this);
-    connect(m_hwManager, &HardwareManager::statusMessage,
-            this, [this](const QString &msg) { updateStatus(msg); });
-    connect(m_hwManager, &HardwareManager::driveDetected,
-            this, [this](const DetectedDriveInfo &info) {
-                /* Forward driveDetected to the existing UI status path.
-                 * The full applyDetectedSettings call would require
-                 * pulling DetectedDriveInfo fields here; for now we
-                 * just surface the model + RPM in the status line. */
-                Q_UNUSED(info);
-                updateStatus(tr("Drive detected via provider"));
-            });
-    /* MF-147 (HW-01): operation lifecycle from worker thread.
-     * Provider I/O now runs on a worker QThread inside HardwareManager,
-     * so the UI no longer freezes during detect/auto-detect. We surface
-     * progress on the status line; finer-grained button-disable comes
-     * later when worker-driven read/write paths land. */
-    connect(m_hwManager, &HardwareManager::operationStarted,
-            this, [this](const QString &name) {
-                updateStatus(tr("Hardware: %1 in progress…").arg(name));
-            });
-    connect(m_hwManager, &HardwareManager::operationFinished,
-            this, [this](const QString &name) {
-                updateStatus(tr("Hardware: %1 done").arg(name));
-            });
+    /* MF-169 (P1.17): the V1 `HardwareManager` was deleted with the rest
+     * of the V1 hierarchy. The worker-thread routing that MF-147 added
+     * lived inside HardwareManager and will be reintroduced in P1.18
+     * around the V2 providers (currently only Greaseweazle's V2 is wired
+     * via `m_gwProviderV2`; the V2 providers themselves are plain C++
+     * classes — moving them onto a worker QThread is a P1.18 follow-up). */
 
     setupButtonGroups();
     setupConnections();
@@ -253,20 +227,11 @@ void HardwareTab::setupConnections()
      * are now codegen-wired (SeeksHead / ReadsRawFlux / MeasuresRPM /
      * Recalibrates capabilities). V1 slots stay until P1.18. */
 
-    // HAL-H7: inject "Unified Capture" next to the existing test buttons.
-    // Added programmatically so no .ui XML edit is needed.
-    if (auto *parent = ui->btnReadTest->parentWidget()) {
-        if (auto *lay = parent->layout()) {
-            auto *btn = new QPushButton(tr("Unified Capture"), parent);
-            btn->setObjectName(QStringLiteral("btnUnifiedCapture"));
-            btn->setToolTip(tr(
-                "Capture disk via unified HAL dispatcher "
-                "(enumerate → open → uft_hw_read_tracks → close).\n"
-                "Greaseweazle backend is fully wired; others are stubs."));
-            lay->addWidget(btn);
-            connect(btn, &QPushButton::clicked, this, &HardwareTab::onUnifiedCapture);
-        }
-    }
+    /* MF-169 (P1.17): the "Unified Capture" button + its `onUnifiedCapture`
+     * slot were the V1-era entry point through `uft_hal_bridge` and the V1
+     * `HardwareManager`. Both are deleted. The codegen-wired btnReadTest
+     * + btnSeekTest + btnCalibrate + btnRPMTest now serve the same role
+     * via the type-driven path. */
 
     /* MF-157 (P1.4): initial codegen wiring pass.
      *
@@ -716,22 +681,25 @@ void HardwareTab::onConnect()
     }
 
     if (controller != "greaseweazle") {
-        m_hwManager->setHardwareType(m_controllerType);
-        m_hwManager->setDevicePath(m_portName);
-        m_hwManager->detectDrive();   /* Honest probe: provider returns
-                                       * its real status via signals
-                                       * (statusMessage / driveDetected
-                                       * already wired in ctor). */
-        /* Mark the connection as live from the manager's perspective.
-         * If the provider's detectDrive() failed it has already
-         * emitted statusMessage("X: not found / driver missing");
-         * we still flip the UI state so the user can disconnect or
-         * retry without restarting the app. */
-        m_connected = true;
-        setConnectionState(true);
-        emit connectionChanged(true);
-        QString deviceName = getDeviceName();
-        emit deviceInfoChanged(deviceName, tr("(provider-managed)"));
+        /* MF-169 (P1.17): the V1 `HardwareManager` that used to dispatch
+         * non-Greaseweazle controllers was deleted with the V1 hierarchy.
+         * The V2 wrappers (`SCPProviderV2`, `KryoFluxProviderV2`,
+         * `FluxEngineProviderV2`, `FC5025ProviderV2`, `XUM1541ProviderV2`,
+         * `ApplesauceProviderV2`, `ADFCopyProviderV2`, `USBFloppyProviderV2`)
+         * all exist and pass the conformance harness with 65 sections.
+         * What is missing is the HardwareTab → V2 routing: today only
+         * Greaseweazle has a `currentProviderV2()` accessor that wires
+         * through to a real instance. P1.18 closes that loop. */
+        QMessageBox::information(this, tr("Controller routing pending"),
+            tr("The %1 backend has a fully conformance-tested V2 provider, "
+               "but HardwareTab does not yet route to it. This is task "
+               "P1.18 in docs/REFACTOR_TASKS.md — the GW V2 routing landed "
+               "first (P1.4), the rest will land in one batch once the "
+               "non-GW provider lifecycle (open/close) is generalized.\n\n"
+               "Use the Greaseweazle controller for now.")
+                .arg(m_controllerType));
+        updateStatus(tr("%1 routing pending (P1.18)").arg(m_controllerType),
+                     /*isError=*/true);
         return;
     }
 
@@ -1635,79 +1603,3 @@ QString HardwareTab::getDeviceName() const
     return name;
 }
 
-// ============================================================================
-// HAL-H7: Unified Capture — drives uft_hw_read_tracks via the C-HAL
-// ============================================================================
-
-void HardwareTab::onUnifiedCapture()
-{
-    /* Figure out which backend type to target from the currently-selected
-     * controller. For this first user-visible end-to-end we only claim
-     * Greaseweazle actually works; other types run but the backend stubs
-     * will report "no device found". */
-    uft_hw_type_t hwType = UFT_HW_UNKNOWN;
-    if (m_controllerType.contains("Greaseweazle", Qt::CaseInsensitive))
-        hwType = UFT_HW_GREASEWEAZLE;
-    else if (m_controllerType.contains("SuperCard", Qt::CaseInsensitive))
-        hwType = UFT_HW_SUPERCARD_PRO;
-    else if (m_controllerType.contains("KryoFlux", Qt::CaseInsensitive))
-        hwType = UFT_HW_KRYOFLUX;
-    else if (m_controllerType.contains("FC5025", Qt::CaseInsensitive))
-        hwType = UFT_HW_FC5025;
-    else if (m_controllerType.contains("XUM", Qt::CaseInsensitive))
-        hwType = UFT_HW_XUM1541;
-
-    if (hwType == UFT_HW_UNKNOWN) {
-        QMessageBox::information(this, tr("Unified Capture"),
-            tr("No recognisable controller selected.\n"
-               "Pick Greaseweazle (fully wired) or another HAL backend."));
-        return;
-    }
-
-    /* The HAL opens its OWN device, independent of the Qt-side
-     * QSerialPort / m_gwDevice. If the Qt side is currently connected
-     * to the same physical port, the HAL-side open will fail — warn. */
-    if (m_connected && hwType == UFT_HW_GREASEWEAZLE) {
-        auto btn = QMessageBox::question(this, tr("Unified Capture"),
-            tr("Hardware is currently connected via the Qt provider.\n"
-               "The unified path must open the same port itself — continue "
-               "and disconnect first?"),
-            QMessageBox::Yes | QMessageBox::No);
-        if (btn != QMessageBox::Yes) return;
-        onDisconnect();
-    }
-
-    updateStatus(tr("Unified Capture running…"));
-    QApplication::setOverrideCursor(Qt::WaitCursor);
-
-    QString errMsg;
-    QVector<TrackData> tracks = uft_hal_bridge::readDiskByType(
-        hwType,
-        /*startCyl=*/0, /*endCyl=*/80,
-        /*heads=*/2, /*revolutions=*/0,
-        &errMsg);
-
-    QApplication::restoreOverrideCursor();
-
-    if (tracks.isEmpty()) {
-        updateStatus(tr("Unified Capture failed"), /*isError=*/true);
-        QMessageBox::warning(this, tr("Unified Capture"),
-            tr("Capture failed: %1").arg(
-                errMsg.isEmpty() ? tr("no device found") : errMsg));
-        return;
-    }
-
-    int good = 0, bad = 0;
-    qint64 bytes = 0;
-    for (const auto &t : tracks) {
-        if (t.success) ++good; else ++bad;
-        bytes += t.data.size();
-    }
-
-    updateStatus(tr("Unified Capture: %1 tracks (%2 OK, %3 failed)")
-                     .arg(tracks.size()).arg(good).arg(bad));
-    QMessageBox::information(this, tr("Unified Capture"),
-        tr("Captured %1 tracks via unified HAL dispatcher.\n\n"
-           "OK: %2   Failed: %3   Bytes: %4")
-            .arg(tracks.size()).arg(good).arg(bad).arg(bytes));
-}

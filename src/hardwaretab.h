@@ -27,7 +27,6 @@ namespace Ui { class TabHardware; }
 
 class HardwareTab;              /* fwd-decl needed before the codegen
                                  * namespace below references it */
-class HardwareManager;          /* see src/hardware_providers/hardwaremanager.h */
 struct DetectedDriveInfo;
 struct HardwareInfo;
 
@@ -193,8 +192,10 @@ private slots:
     void onRPMTest();
     void onCalibrate();
 
-    // HAL-H7: Unified Capture via C-HAL dispatcher
-    void onUnifiedCapture();
+    /* MF-169 (P1.17): `onUnifiedCapture()` removed with the V1 hierarchy.
+     * It consumed the V1 `unified_hal_bridge`, both of which are gone.
+     * The V2 wire_action codegen path (P1.4) replaces it for the
+     * capability-bound test buttons. */
 
 private:
     void setupConnections();
@@ -248,13 +249,10 @@ private:
     int m_hwModel;              // Hardware model (e.g., F1=1, F7=7)
     void *m_gwDevice;           // HAL device handle (uft_gw_device_t*)
 
-    /* MF-143: Qt provider dispatcher restored. The C-HAL fast-path
-     * (uft_gw_open) is still used for Greaseweazle since that's the
-     * production-tested path; HardwareManager is the routing layer
-     * for every OTHER controller (FluxEngine subprocess, KryoFlux
-     * DTC subprocess, SCP serial, Applesauce serial, FC5025 USB,
-     * XUM1541 USB, ADF-Copy serial, USB-Floppy SG_IO). */
-    HardwareManager *m_hwManager;
+    /* MF-169 (P1.17): The V1 `HardwareManager` dispatcher was deleted
+     * with the V1 provider hierarchy. Routing for non-Greaseweazle
+     * controllers via V2 providers is task P1.18 — until then those
+     * controllers display a "no V2 routing wired" message on Connect. */
 
     /* MF-157 (P1.4): V2 mixin-composition wrapper around the C-HAL
      * Greaseweazle handle (m_gwDevice). Created on connect, reset on

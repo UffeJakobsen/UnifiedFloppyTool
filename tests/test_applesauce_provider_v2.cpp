@@ -442,10 +442,14 @@ static void smoke_read_raw_flux_happy_path() {
     std::visit(overloaded{
         [&](const FluxCaptured& f) {
             got_captured = true;
-            /* Rule F-3: transitions preserved verbatim (16 flux bytes = 4 transitions) */
+            /* Rule F-3: transitions preserved verbatim.
+             * make_flux_bytes(16) is parameterized on n_transitions
+             * (NOT n_bytes — that was a comment-vs-impl confusion in
+             * the original commit, see MF-169-FIX). 16 transitions ×
+             * 4 bytes per LE32 = 64 input bytes → 16 output transitions. */
             assert(!f.transitions_ns.empty() && "FluxCaptured.transitions_ns must not be empty");
-            assert(f.transitions_ns.size() == 4
-                   && "16 bytes / 4 bytes per LE32 = 4 transitions");
+            assert(f.transitions_ns.size() == 16
+                   && "make_flux_bytes(16) produces 16 transitions");
             /* Each 4000-tick transition at 8 MHz = 4000 * 125 ns = 500000 ns */
             assert(f.transitions_ns[0] == 500000u
                    && "4000 ticks * 125 ns/tick must = 500000 ns");

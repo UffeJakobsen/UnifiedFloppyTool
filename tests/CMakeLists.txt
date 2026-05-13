@@ -459,14 +459,11 @@ if(TARGET Qt6::Test)
             Qt6::Core Qt6::Test
         )
 
-        # Link hardware_providers if available (needed by test_adfcopy_backend
-        # and similar provider-touching tests). MF-155 (P1.3): test_wiring_runtime
-        # is self-contained — it carries an inline mock provider — and must NOT
-        # pull in hardware_providers; otherwise a transitive build failure in
-        # that lib would mask the wire_action verification.
-        if(TARGET hardware_providers AND NOT ${qt_test_name} STREQUAL "test_wiring_runtime")
-            target_link_libraries(${qt_test_name} PRIVATE hardware_providers)
-        endif()
+        # MF-169 (P1.17): the V1 `hardware_providers` cmake target was
+        # deleted with the V1 provider hierarchy. Qt-side tests now
+        # link only against Qt6::Core+Test+Widgets+SerialPort. The V2
+        # provider tests live in `_HEADER_ONLY_CPP_TESTS` and pull
+        # their own per-test target_sources for the specific V2 cpp.
         if(TARGET Qt6::SerialPort AND NOT ${qt_test_name} STREQUAL "test_wiring_runtime")
             target_link_libraries(${qt_test_name} PRIVATE Qt6::SerialPort)
         endif()

@@ -45,8 +45,8 @@ P0 headers must not be edited during P1.
 | P1.13 | `ApplesauceProviderV2` (Read+Write flux via QSerialPort)                   | P1.6       | ✅ MF-166 |
 | P1.14 | `ADFCopyProviderV2` (Read+Write flux via QSerialPort)                      | P1.6       | ✅ MF-167 |
 | P1.15 | `USBFloppyProviderV2` (Read+Write sector via UFI HAL)                      | P1.6       | ✅ MF-168 |
-| P1.16 | DTO migration: `if (r.success)` → `std::visit` in jobs + tabs              | P1.1–1.15  | ⬜     |
-| P1.17 | Drop V1 base class + 10 V1 provider files                                  | P1.16      | ⬜     |
+| P1.16 | DTO migration: `if (r.success)` → `std::visit` in jobs + tabs              | P1.1–1.15  | ✅ obsolete — audit (pre-MF-169) found only 2 consumer sites (`unified_hal_bridge` + `onUnifiedCapture`), both deleted with V1 in P1.17. No separate migration needed. |
+| P1.17 | Drop V1 base class + 10 V1 provider files                                  | P1.16      | ✅ MF-169 |
 | P1.18 | Internalize `uft_gw_*` — out of `hardwaretab.cpp`, only in GW provider     | P1.4, P1.17| ⬜     |
 | P1.19 | Remove X1541-family entries from controller combo                          | P1.4       | ⬜     |
 
