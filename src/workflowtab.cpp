@@ -28,7 +28,6 @@
 #include "ui_tab_workflow.h"
 #include "decodejob.h"
 #include "fluxcapturejob.h"
-#include "hardware_providers/greaseweazle_provider_v2.h"  // MF-200
 #include "fluxwritejob.h"
 #include "uft_flux_histogram_widget.h"
 #include <QTextEdit>
@@ -577,13 +576,12 @@ void WorkflowTab::onStartAbortClicked()
                 return;
             }
             m_writeJob = new FluxWriteJob();
-            // MF-200: FluxWriteJob is not migrated yet (that is P1.21) —
-            // until then it keeps the raw_handle() escape hatch. The
-            // provider owns the handle; this is a non-owning view.
-            m_writeJob->setDevice(m_gwProvider ? m_gwProvider->raw_handle()
-                                               : nullptr);
+            // MF-201 (P1.21): FluxWriteJob now drives the V2 outcome
+            // surface — same non-owning provider as FluxCaptureJob. The
+            // drive unit is already bound on the provider, so there is no
+            // separate setDriveUnit() on the job any more.
+            m_writeJob->setProvider(m_gwProvider);
             m_writeJob->setInputPath(m_sourceFile);
-            m_writeJob->setDriveUnit(0);
             m_writeJob->setVerify(false);
             m_writeJob->moveToThread(m_workerThread);
 

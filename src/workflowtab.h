@@ -79,10 +79,11 @@ signals:
 public slots:
     void onDeviceInfoChanged(const QString& deviceName, const QString& firmware);
 
-    // MF-110 / MF-200 — MainWindow forwards HardwareTab's non-owning
-    // GreaseweazleProviderV2* every time the connection state flips.
-    // Pass nullptr when disconnected. FluxCaptureJob drives it via the
-    // V2 outcome surface; FluxWriteJob still uses raw_handle() until P1.21.
+    // MF-110 / MF-200 / MF-201 — MainWindow forwards HardwareTab's
+    // non-owning GreaseweazleProviderV2* every time the connection state
+    // flips. Pass nullptr when disconnected. Both FluxCaptureJob (P1.20)
+    // and FluxWriteJob (P1.21) drive it via the V2 outcome surface — the
+    // raw_handle() escape hatch has no consumers left (P1.22 can remove it).
     void setHardwareDevice(::uft::hal::GreaseweazleProviderV2 *provider,
                            int cylinders, int sides);
 
