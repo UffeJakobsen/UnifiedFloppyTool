@@ -23,8 +23,9 @@
  *      - Queue a successful fluxengine rpm reply with RPM.
  *      - Call measure_rpm() — verify RpmMeasured is returned.
  *      - Queue a successful fluxengine read reply with raw flux bytes.
- *      - Call read_raw_flux() — verify FluxCaptured is returned.
- *      - Verify F-3: revolutions field set, sample_ns matches FluxEngine 8 MHz.
+ *      - Call read_raw_flux() — MF-203 (P1.24/ARCH-2): the undecoded
+ *        .flux container must NOT be mislabelled as a FluxCaptured;
+ *        verify an honest, F-4-compliant ProviderError is returned.
  *      - Queue a successful fluxengine write reply.
  *      - Call write_raw_flux(verify=false) — verify WriteCompleted.
  *      - Queue write + read-back replies for verify=true path.
@@ -229,13 +230,22 @@ static void smoke_detect_drive_happy_path()
 {
     SubprocessMock mock;
 
-    /* Queue a fluxengine rpm success reply with RPM. */
+    /* do_detect_drive invokes the runner TWICE: first `fluxengine rpm`
+     * (drive detection + RPM), then `fluxengine version` via
+     * query_version() (FE-F6, MF-191) for the firmware string. Script
+     * both, in that order. */
     mock.queue_run(SubprocessMock::ScriptedRun{
         { "fluxengine", "rpm" },      /* require_argv_subseq */
         "PC floppy drive detected\n"
         "300.0 rpm\n",                /* stdout_reply */
         "",                           /* stderr_reply */
         0                             /* exit_code */
+    });
+    mock.queue_run(SubprocessMock::ScriptedRun{
+        { "fluxengine", "version" },  /* query_version() invocation */
+        "FluxEngine 0.NN\n",
+        "",
+        0
     });
 
     FluxEngineProviderV2 p(make_runner(mock), "fluxengine");
@@ -294,13 +304,17 @@ static void smoke_measure_rpm_happy_path()
     mock.assert_consumed();
 }
 
-static void smoke_read_raw_flux_happy_path()
+static void smoke_read_raw_flux_decoder_not_implemented()
 {
     SubprocessMock mock;
 
-    /* Queue a fluxengine read success reply. In mock/test mode, the provider
-     * interprets stdout_text as the raw flux bytes. Supply 8 bytes of
-     * synthetic flux data (2 uint32_t words). */
+    /* Queue a fluxengine read success reply carrying raw bytes.
+     * MF-203 (P1.24 / audit ARCH-2): the provider must NOT fabricate a
+     * FluxCaptured by re-interpreting these .flux-container bytes as
+     * little-endian uint32_t "ns intervals" — that was a
+     * forensic-integrity violation. Until a real .flux decoder lands,
+     * do_read_raw_flux runs fluxengine, sees the bytes, and returns an
+     * honest, F-4-compliant ProviderError instead. */
     const std::string raw_flux = "\x01\x02\x03\x04\x05\x06\x07\x08";
 
     mock.queue_run(SubprocessMock::ScriptedRun{
@@ -317,32 +331,27 @@ static void smoke_read_raw_flux_happy_path()
     FluxEngineProviderV2 p(make_runner(mock), "fluxengine");
     auto outcome = p.read_raw_flux(ReadFluxParams{0, 0, 2, 0});
 
-    bool got_captured = false;
+    bool got_error = false;
     std::visit(overloaded{
-        [&](const FluxCaptured& f) {
-            got_captured = true;
-            /* Rule F-3: revolutions field set correctly. */
-            assert(f.revolutions > 0  && "revolutions must be > 0");
-            /* FluxEngine 8 MHz clock: sample_ns = 125 ns */
-            assert(f.sample_ns > 124.0 && f.sample_ns < 126.0
-                   && "sample_ns must be 125 ns (FluxEngine 8 MHz clock)");
-            /* 8 raw bytes => 2 uint32_t words (little-endian). */
-            assert(f.transitions_ns.size() == 2
-                   && "8 raw bytes must produce 2 uint32_t words");
-            /* Verify LE assembly. */
-            assert(f.transitions_ns[0] == 0x04030201u
-                   && "first word must be LE 0x04030201");
-            assert(f.transitions_ns[1] == 0x08070605u
-                   && "second word must be LE 0x08070605");
+        [&](const FluxCaptured&) {
+            assert(false && "MF-203: undecoded .flux container bytes must "
+                            "NOT be mislabelled as a FluxCaptured (ARCH-2)");
         },
         [&](const FluxMarginal&)             {},
         [&](const FluxUnreadable&)           {},
         [&](const CapabilityRequiresPolicy&) {},
         [&](const HardwareDisconnected&)     {},
-        [&](const ProviderError&)            {},
+        [&](const ProviderError& e) {
+            got_error = true;
+            /* F-4: every ProviderError carries non-empty what/why/fix. */
+            assert(!e.what.empty() && !e.why.empty() && !e.fix.empty()
+                   && "ProviderError must be F-4 compliant (what/why/fix)");
+        },
     }, outcome);
 
-    assert(got_captured && "read_raw_flux with scripted success must return FluxCaptured");
+    assert(got_error && "read_raw_flux on an undecoded .flux container must "
+                        "return an honest ProviderError, not a fabricated "
+                        "FluxCaptured");
     mock.assert_consumed();
 }
 
@@ -737,11 +746,18 @@ static void smoke_detect_drive_no_rpm_in_output()
 {
     SubprocessMock mock;
 
-    /* fluxengine rpm output without a parseable RPM value. */
+    /* fluxengine rpm output without a parseable RPM value. do_detect_drive
+     * then also calls query_version() (FE-F6) → a second `version` run. */
     mock.queue_run(SubprocessMock::ScriptedRun{
         { "fluxengine", "rpm" },
         "FluxEngine drive detected\n"
         "Disk present\n",   /* no RPM number in output */
+        "",
+        0
+    });
+    mock.queue_run(SubprocessMock::ScriptedRun{
+        { "fluxengine", "version" },  /* query_version() invocation */
+        "FluxEngine 0.NN\n",
         "",
         0
     });
@@ -815,7 +831,7 @@ int main()
     smoke_null_runner_returns_provider_error();
     smoke_detect_drive_happy_path();
     smoke_measure_rpm_happy_path();
-    smoke_read_raw_flux_happy_path();
+    smoke_read_raw_flux_decoder_not_implemented();
     smoke_write_raw_flux_no_verify();
     smoke_write_raw_flux_with_verify();
     smoke_detect_drive_failure();

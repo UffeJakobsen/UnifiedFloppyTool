@@ -306,45 +306,36 @@ FluxOutcome KryoFluxProviderV2::do_read_raw_flux(const ReadFluxParams& p)
         };
     }
 
-    /* Rule F-3: preserve all raw stream bytes verbatim.
-     * KryoFlux stream bytes are re-interpreted as uint32_t words
-     * (little-endian) to fit transitions_ns. The KryoFlux sample clock
-     * is 24 MHz = 41.667 ns per tick. All bytes are preserved — no
-     * pruning, resampling, or averaging. Downstream DeepRead pipeline
-     * handles KryoFlux opcode decoding. */
-
-    /* Convert raw bytes to uint32_t words (LE, zero-pad to alignment). */
-    std::vector<uint32_t> words;
-    const size_t nbytes = raw_bytes.size();
-    words.reserve((nbytes + 3) / 4);
-
-    size_t i = 0;
-    while (i + 4 <= nbytes) {
-        uint32_t w = static_cast<uint8_t>(raw_bytes[i])
-                   | (static_cast<uint32_t>(static_cast<uint8_t>(raw_bytes[i+1])) << 8)
-                   | (static_cast<uint32_t>(static_cast<uint8_t>(raw_bytes[i+2])) << 16)
-                   | (static_cast<uint32_t>(static_cast<uint8_t>(raw_bytes[i+3])) << 24);
-        words.push_back(w);
-        i += 4;
-    }
-    /* Tail bytes (< 4 remaining): zero-pad to uint32_t. */
-    if (i < nbytes) {
-        uint32_t w = 0;
-        for (size_t k = 0; k < nbytes - i; ++k) {
-            w |= (static_cast<uint32_t>(static_cast<uint8_t>(raw_bytes[i + k])) << (8 * k));
-        }
-        words.push_back(w);
-    }
-
-    FluxCaptured captured;
-    captured.position       = CHS{cylinder, head};
-    captured.revolutions    = revolutions;
-    /* KryoFlux 24 MHz clock: 1 / 24e6 Hz = 41.667 ns per sample. */
-    captured.sample_ns      = 1000.0 / 24.0;   /* ~41.667 ns */
-    captured.quality        = QualityFlag::None;
-    captured.transitions_ns = std::move(words);
-
-    return captured;
+    /* MF-203 (P1.24 / audit ARCH-2): the KryoFlux stream container is
+     * NOT yet decoded. The previous code re-interpreted these raw stream
+     * bytes as little-endian uint32_t words and stored them in
+     * FluxCaptured::transitions_ns — a field whose contract is
+     * *nanosecond transition intervals*. That is fabricated timing data
+     * ("stille Veränderung"): a downstream consumer would read KryoFlux
+     * stream opcodes as flux-ns and silently corrupt every interval.
+     *
+     * Until a real KryoFlux stream decoder lands — FLUX1/2/3 + Nop/Ovl +
+     * OOB index blocks → ns intervals at the 24 MHz sample clock, which
+     * needs the vendored stream-format spec + HIL test vectors and
+     * cannot be written speculatively — the forensically honest answer
+     * is a typed ProviderError, not a FluxCaptured carrying garbage.
+     * This matches the honest-scaffold pattern the audit confirmed for
+     * the SCP / XUM1541 / Applesauce providers. */
+    (void)revolutions;
+    return ProviderError{
+        UFT_E_GENERIC,
+        "KryoFlux raw-stream decoding not implemented",
+        "do_read_raw_flux received " + std::to_string(raw_bytes.size()) +
+            " bytes of KryoFlux stream-format data from DTC, but the "
+            "stream-container decoder (FLUX1/2/3 + Nop/Ovl + OOB index "
+            "blocks -> nanosecond transition intervals) is not yet "
+            "written. Emitting a FluxCaptured here would mislabel "
+            "undecoded opcode bytes as flux timing — a forensic-integrity "
+            "violation (audit finding ARCH-2).",
+        "Implement the KryoFlux stream decoder (REFACTOR_TASKS.md P1.24). "
+        "It needs the KryoFlux stream-format spec + HIL test vectors from "
+        "real hardware; it must not be guessed."
+    };
 }
 
 /* ────────────────────────────────────────────────────────────────────────

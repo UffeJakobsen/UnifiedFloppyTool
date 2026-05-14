@@ -23,8 +23,9 @@
  *      - Queue a successful DTC -i0 reply with firmware banner + RPM.
  *      - Call detect_drive() — verify DriveDetected is returned.
  *      - Queue a successful DTC read reply with raw stream bytes.
- *      - Call read_raw_flux() — verify FluxCaptured is returned.
- *      - Verify F-3: revolutions field set, sample_ns matches KF 24 MHz clock.
+ *      - Call read_raw_flux() — MF-203 (P1.24/ARCH-2): the undecoded
+ *        KryoFlux stream must NOT be mislabelled as a FluxCaptured;
+ *        verify an honest, F-4-compliant ProviderError is returned.
  *   4. Error path smoke:
  *      - Queue a failing DTC exit (exit_code=1, stderr = "no device").
  *      - Call detect_drive() — verify ProviderError is returned, F-4 compliant.
@@ -212,12 +213,16 @@ static void smoke_detect_drive_happy_path() {
     mock.assert_consumed();
 }
 
-static void smoke_read_raw_flux_happy_path() {
+static void smoke_read_raw_flux_decoder_not_implemented() {
     SubprocessMock mock;
 
-    /* Queue a DTC read success reply. In mock/test mode, the provider
-     * interprets stdout_text as the raw stream bytes. We supply 8 bytes
-     * of synthetic KryoFlux stream data (2 uint32_t words). */
+    /* Queue a DTC read success reply carrying raw KryoFlux stream bytes.
+     * MF-203 (P1.24 / audit ARCH-2): the provider must NOT fabricate a
+     * FluxCaptured by re-interpreting these opcode bytes as little-endian
+     * uint32_t "ns intervals" — that was a forensic-integrity violation.
+     * Until a real KryoFlux stream decoder lands, do_read_raw_flux runs
+     * DTC, sees the bytes, and returns an honest, F-4-compliant
+     * ProviderError instead. */
     const std::string raw_stream = "\x01\x02\x03\x04\x05\x06\x07\x08";
 
     mock.queue_run(SubprocessMock::ScriptedRun{
@@ -230,32 +235,27 @@ static void smoke_read_raw_flux_happy_path() {
     KryoFluxProviderV2 p(make_runner(mock), "dtc");
     auto outcome = p.read_raw_flux(ReadFluxParams{0, 0, 2, 0});
 
-    bool got_captured = false;
+    bool got_error = false;
     std::visit(overloaded{
-        [&](const FluxCaptured& f) {
-            got_captured = true;
-            /* Rule F-3: revolutions field set correctly. */
-            assert(f.revolutions > 0 && "revolutions must be > 0");
-            /* KryoFlux 24 MHz clock: sample_ns ~= 41.667 ns */
-            assert(f.sample_ns > 40.0 && f.sample_ns < 43.0
-                   && "sample_ns must be ~41.667 ns (KryoFlux 24 MHz clock)");
-            /* 8 raw bytes => 2 uint32_t words (little-endian). */
-            assert(f.transitions_ns.size() == 2
-                   && "8 raw bytes must produce 2 uint32_t words");
-            /* Verify the words are correctly assembled (LE). */
-            assert(f.transitions_ns[0] == 0x04030201u
-                   && "first word must be LE 0x04030201");
-            assert(f.transitions_ns[1] == 0x08070605u
-                   && "second word must be LE 0x08070605");
+        [&](const FluxCaptured&) {
+            assert(false && "MF-203: an undecoded KryoFlux stream must NOT "
+                            "be mislabelled as a FluxCaptured (audit ARCH-2)");
         },
         [&](const FluxMarginal&)             {},
         [&](const FluxUnreadable&)           {},
         [&](const CapabilityRequiresPolicy&) {},
         [&](const HardwareDisconnected&)     {},
-        [&](const ProviderError&)            {},
+        [&](const ProviderError& e) {
+            got_error = true;
+            /* F-4: every ProviderError carries non-empty what/why/fix. */
+            assert(!e.what.empty() && !e.why.empty() && !e.fix.empty()
+                   && "ProviderError must be F-4 compliant (what/why/fix)");
+        },
     }, outcome);
 
-    assert(got_captured && "read_raw_flux with scripted DTC success must return FluxCaptured");
+    assert(got_error && "read_raw_flux on an undecoded KryoFlux stream must "
+                        "return an honest ProviderError, not a fabricated "
+                        "FluxCaptured");
     mock.assert_consumed();
 }
 
@@ -484,7 +484,7 @@ int main() {
     smoke_identity();
     smoke_null_runner_returns_provider_error();
     smoke_detect_drive_happy_path();
-    smoke_read_raw_flux_happy_path();
+    smoke_read_raw_flux_decoder_not_implemented();
     smoke_detect_drive_dtc_failure();
     smoke_read_raw_flux_dtc_failure();
     smoke_dtc_empty_stream();

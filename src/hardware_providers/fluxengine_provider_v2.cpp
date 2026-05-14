@@ -350,39 +350,10 @@ std::string FluxEngineProviderV2::query_version()
     return parse_version_from_fe_output(result.stdout_text + result.stderr_text);
 }
 
-/* ────────────────────────────────────────────────────────────────────────
- *  Raw bytes → uint32_t words (little-endian, zero-pad to alignment)
- *
- *  Shared logic for both read and write-verify paths: converts a raw
- *  byte string to a vector of uint32_t words for FluxCaptured::transitions_ns.
- *  Rule F-3: all bytes preserved verbatim, including any tail padding.
- * ──────────────────────────────────────────────────────────────────────── */
-
-static std::vector<uint32_t> bytes_to_words(const std::string& raw_bytes)
-{
-    const size_t nbytes = raw_bytes.size();
-    std::vector<uint32_t> words;
-    words.reserve((nbytes + 3) / 4);
-
-    size_t i = 0;
-    while (i + 4 <= nbytes) {
-        uint32_t w = static_cast<uint8_t>(raw_bytes[i])
-                   | (static_cast<uint32_t>(static_cast<uint8_t>(raw_bytes[i+1])) << 8)
-                   | (static_cast<uint32_t>(static_cast<uint8_t>(raw_bytes[i+2])) << 16)
-                   | (static_cast<uint32_t>(static_cast<uint8_t>(raw_bytes[i+3])) << 24);
-        words.push_back(w);
-        i += 4;
-    }
-    /* Tail bytes (< 4 remaining): zero-pad to uint32_t. */
-    if (i < nbytes) {
-        uint32_t w = 0;
-        for (size_t k = 0; k < nbytes - i; ++k) {
-            w |= (static_cast<uint32_t>(static_cast<uint8_t>(raw_bytes[i + k])) << (8 * k));
-        }
-        words.push_back(w);
-    }
-    return words;
-}
+/* MF-203 (P1.24): the `bytes_to_words()` helper that re-interpreted raw
+ * .flux container bytes as uint32_t words was removed — it only ever fed
+ * the ARCH-2 fabrication in do_read_raw_flux (see below). The real .flux
+ * decoder, when written, will not be a flat byte-repack. */
 
 /* ────────────────────────────────────────────────────────────────────────
  *  do_read_raw_flux
@@ -487,22 +458,39 @@ FluxOutcome FluxEngineProviderV2::do_read_raw_flux(const ReadFluxParams& p)
         };
     }
 
-    /* Rule F-3: preserve all raw flux bytes verbatim.
-     * FluxEngine .flux bytes are re-interpreted as uint32_t words (LE) to
-     * fit transitions_ns. FluxEngine uses an 8 MHz clock = 125 ns per tick.
-     * All bytes preserved — no pruning, resampling, or averaging.
-     * Downstream DeepRead pipeline handles .flux format decoding. */
-    std::vector<uint32_t> words = bytes_to_words(raw_bytes);
-
-    FluxCaptured captured;
-    captured.position       = CHS{cylinder, head};
-    captured.revolutions    = revolutions;
-    /* FluxEngine 8 MHz clock: 1 / 8e6 Hz = 125 ns per sample. */
-    captured.sample_ns      = 125.0;
-    captured.quality        = QualityFlag::None;
-    captured.transitions_ns = std::move(words);
-
-    return captured;
+    /* MF-203 (P1.24 / audit ARCH-2): the FluxEngine .flux container is
+     * NOT yet decoded. The previous code re-interpreted these raw .flux
+     * bytes as little-endian uint32_t words and stored them in
+     * FluxCaptured::transitions_ns — a field whose contract is
+     * *nanosecond transition intervals*. That is fabricated timing data
+     * ("stille Veränderung"): a downstream consumer would read .flux
+     * container bytes as flux-ns and silently corrupt every interval.
+     * Compounding, per audit ARCH-2: `raw_bytes` here is stdout_text,
+     * which for real fluxengine is its LOG, not the .flux file at all.
+     *
+     * Until a real FluxEngine .flux decoder lands — which needs the
+     * vendored .flux format spec + HIL test vectors and a production
+     * runner that returns the actual .flux file content rather than the
+     * tool log — the forensically honest answer is a typed
+     * ProviderError, not a FluxCaptured carrying garbage. This matches
+     * the honest-scaffold pattern the audit confirmed for the SCP /
+     * XUM1541 / Applesauce providers. */
+    (void)revolutions;
+    return ProviderError{
+        UFT_E_GENERIC,
+        "FluxEngine .flux decoding not implemented",
+        "do_read_raw_flux received " + std::to_string(raw_bytes.size()) +
+            " bytes from the fluxengine runner, but the .flux container "
+            "decoder is not yet written — and per audit ARCH-2 the bytes "
+            "currently come from stdout_text (the tool log), not the "
+            ".flux file. Emitting a FluxCaptured here would mislabel "
+            "undecoded bytes as flux timing — a forensic-integrity "
+            "violation.",
+        "Implement the FluxEngine .flux decoder + a production runner "
+        "that returns the .flux file content (REFACTOR_TASKS.md P1.24). "
+        "It needs the vendored .flux format spec + HIL test vectors; it "
+        "must not be guessed."
+    };
 }
 
 /* ────────────────────────────────────────────────────────────────────────
