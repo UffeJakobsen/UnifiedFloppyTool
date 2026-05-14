@@ -395,10 +395,11 @@ size_t uft_flux_to_bits_pll(
  * Misc stubs
  * ============================================================================ */
 
-const char* uft_longtrack_type_name(int type) {
-    (void)type;
-    return "Unknown";
-}
+/* uft_longtrack_type_name() — stub REMOVED (MF-231): the real
+ * implementation now lives in src/protection/uft_longtrack.c (MF-227),
+ * which also defines uft_longtrack_get_def(). Keeping the stub here
+ * caused a multiple-definition link error in the qmake build (the test
+ * build did not link this TU, so it slipped through). */
 
 /* LZHUF decompressor for DMS-Heavy / NBZ archives.
  *
