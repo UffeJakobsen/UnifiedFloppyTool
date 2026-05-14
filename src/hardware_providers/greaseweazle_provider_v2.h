@@ -152,17 +152,10 @@ public:
     /** True iff `open()` succeeded and `close()` has not been called. */
     bool is_open() const noexcept { return m_handle != nullptr; }
 
-    /**
-     * @brief Raw handle accessor — backwards-compatibility escape
-     * hatch for FluxCaptureJob / FluxWriteJob (legacy V1-shape
-     * consumers that still call uft_gw_* directly).
-     *
-     * SCHEDULED FOR REMOVAL once P1.20/P1.21 migrate those jobs to the
-     * V2 outcome surface. Until then this accessor lets the C-API
-     * fast-path stay reachable from one place while everything else
-     * routes through V2 methods.
-     */
-    void *raw_handle() const noexcept { return m_handle; }
+    /* MF-202 (P1.22): `raw_handle()` — the V1-shape C-API escape hatch —
+     * is removed. Its only consumers, FluxCaptureJob and FluxWriteJob,
+     * were migrated to the V2 outcome surface in P1.20 / P1.21; every
+     * uft_gw_* call now lives behind the do_* methods of this class. */
 
     /** Firmware version string, e.g. "v1.4". Empty before open(). */
     const std::string &firmware_version() const noexcept {

@@ -73,15 +73,11 @@ public:
     QString currentController() const { return m_controllerType; }
     ControllerRole currentRole() const { return m_controllerRole; }
 
-    /* MF-171 (P1.18): the Greaseweazle C-handle is now owned by the V2
-     * provider (`m_gwProviderV2`). HardwareTab no longer holds a
-     * `void *m_gwDevice` member. `gwDevice()` remains as a delegating
-     * accessor that returns `m_gwProviderV2->raw_handle()` — a legacy
-     * escape hatch for FluxCaptureJob / FluxWriteJob until their P1.20
-     * / P1.21 migration to the V2 outcome surface. Returns nullptr
-     * when not connected. The handle is owned by the provider; do not
-     * close it from the caller. */
-    void *gwDevice() const;
+    /* MF-202 (P1.22): `gwDevice()` — the legacy `void*` C-handle
+     * accessor — is removed. FluxCaptureJob (P1.20) and FluxWriteJob
+     * (P1.21) now receive the non-owning `GreaseweazleProviderV2*` via
+     * `currentProviderV2()` and drive it through the V2 outcome
+     * surface; nothing reaches for the raw handle any more. */
     int detectedTracks() const { return m_detectedTracks; }
     int detectedHeads() const { return m_detectedHeads; }
     
@@ -260,14 +256,16 @@ private:
 
     /* MF-157 (P1.4): V2 mixin-composition wrapper around the
      * Greaseweazle device.
-     * MF-171 (P1.18): the provider now OWNS the uft_gw_device_t*
-     * handle. `m_gwDevice void*` is gone — `gwDevice()` delegates to
-     * `m_gwProviderV2->raw_handle()` until P1.20/P1.21 migrate the
-     * remaining FluxCaptureJob / FluxWriteJob direct-C-API consumers.
-     * The forward-declared dtor in greaseweazle_provider_v2.h is
-     * sufficient for unique_ptr's destructor instantiation here
-     * because HardwareTab's destructor is defined in hardwaretab.cpp
-     * where the V2 type is complete. */
+     * MF-171 (P1.18): the provider OWNS the uft_gw_device_t* handle —
+     * the V1 `m_gwDevice void*` member is gone.
+     * MF-200/201/202 (P1.20–22): FluxCaptureJob / FluxWriteJob now take
+     * a non-owning `GreaseweazleProviderV2*` (via currentProviderV2())
+     * and drive it through the V2 outcome surface; the gwDevice() /
+     * raw_handle() escape hatch is removed. This unique_ptr is the sole
+     * owner. The forward-declared dtor in greaseweazle_provider_v2.h is
+     * sufficient for unique_ptr's destructor instantiation here because
+     * HardwareTab's destructor is defined in hardwaretab.cpp where the
+     * V2 type is complete. */
     std::unique_ptr<::uft::hal::GreaseweazleProviderV2> m_gwProviderV2;
 
     /* Re-runs `wire_hardware_tab(this)` so Phase-1 disconnect, Phase-2

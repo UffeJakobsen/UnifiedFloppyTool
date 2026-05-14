@@ -82,8 +82,8 @@ public slots:
     // MF-110 / MF-200 / MF-201 — MainWindow forwards HardwareTab's
     // non-owning GreaseweazleProviderV2* every time the connection state
     // flips. Pass nullptr when disconnected. Both FluxCaptureJob (P1.20)
-    // and FluxWriteJob (P1.21) drive it via the V2 outcome surface — the
-    // raw_handle() escape hatch has no consumers left (P1.22 can remove it).
+    // and FluxWriteJob (P1.21) drive it via the V2 outcome surface; the
+    // raw_handle()/gwDevice() escape hatch was removed in P1.22 (MF-202).
     void setHardwareDevice(::uft::hal::GreaseweazleProviderV2 *provider,
                            int cylinders, int sides);
 

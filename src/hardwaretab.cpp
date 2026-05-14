@@ -255,16 +255,12 @@ void HardwareTab::rewireV2()
     return m_gwProviderV2.get();
 }
 
-void *HardwareTab::gwDevice() const
-{
-    /* MF-171 (P1.18): delegate to the V2 provider's raw_handle
-     * accessor. The V2 provider OWNS the uft_gw_device_t* — this
-     * pointer is a non-owning view used by FluxCaptureJob /
-     * FluxWriteJob's legacy direct-uft_gw_* paths. SCHEDULED FOR
-     * REMOVAL once those jobs migrate to the V2 outcome surface
-     * (tasks P1.20 / P1.21 added by this commit). */
-    return m_gwProviderV2 ? m_gwProviderV2->raw_handle() : nullptr;
-}
+/* MF-202 (P1.22): HardwareTab::gwDevice() removed. The legacy `void*`
+ * C-handle escape hatch had a single purpose — feeding the raw
+ * uft_gw_device_t* to FluxCaptureJob / FluxWriteJob. Both were migrated
+ * to the V2 outcome surface (P1.20 / P1.21) and now take a non-owning
+ * GreaseweazleProviderV2* via currentProviderV2(). GreaseweazleProviderV2
+ * ::raw_handle() is removed in the same commit. */
 
 // ============================================================================
 // Controller List Management
