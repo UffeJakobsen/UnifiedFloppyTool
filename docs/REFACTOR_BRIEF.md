@@ -247,7 +247,7 @@ sections automatically — no per-provider test boilerplate.
 | `cmake --build` on Linux + macOS + Windows MinGW                | green                                     |
 | `ctest` count vs baseline (post-MF-149)                         | ≥ baseline + new conformance tests        |
 | `tests/HARDWARE_TRUTH_TESTS.md` boxes                           | all checked by Axel against real hardware |
-| `KNOWN_ISSUES.md` H-1 / H-2 / H-9 entries                       | removed (resolved)                        |
+| `KNOWN_ISSUES.md` M.-2 (rule H-9) entry                         | CLOSED (MF-174). H-1 / H-2 never had own entries — structural in V2 from day one |
 | `git tag v4.1.4-rc1`                                            | set; +14 day pre-release window starts    |
 
 After 14 days of community/own pre-release testing:
