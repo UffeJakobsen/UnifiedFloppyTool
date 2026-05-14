@@ -30,7 +30,20 @@
  *   - the codegen-emitted wire_hardware_tab() function (which lives in
  *     generated/tab_hardware_wiring.gen.cpp) calls do_*() through the
  *     wire_action template. */
+/* MF-205 (P1.23): the ProviderV2Variant member holds a unique_ptr to
+ * any of the 9 V2 providers — the variant's destructor (run from
+ * ~HardwareTab in this TU) needs every alternative's complete type. */
 #include "hardware_providers/greaseweazle_provider_v2.h"
+#include "hardware_providers/scp_provider_v2.h"
+#include "hardware_providers/kryoflux_provider_v2.h"
+#include "hardware_providers/fluxengine_provider_v2.h"
+#include "hardware_providers/fc5025_provider_v2.h"
+#include "hardware_providers/xum1541_provider_v2.h"
+#include "hardware_providers/applesauce_provider_v2.h"
+#include "hardware_providers/adfcopy_provider_v2.h"
+#include "hardware_providers/usbfloppy_provider_v2.h"
+
+#include <variant>
 
 #include <QMessageBox>
 #include <QRandomGenerator>
@@ -245,14 +258,15 @@ void HardwareTab::rewireV2()
     ::uft::gui::generated::wire_hardware_tab(this);
 }
 
-::uft::hal::GreaseweazleProviderV2 *HardwareTab::currentProviderV2() const noexcept
+const ProviderV2Variant &HardwareTab::currentProviderV2() const noexcept
 {
-    /* Returns the V2 wrapper around the Greaseweazle C-HAL handle, or
-     * nullptr when no GW device is currently open. Other controllers
-     * have V2 wrappers (P1.8–P1.15) but HardwareTab does not yet
-     * route to them — that's a P1.18/P1.20-bound follow-up. For
-     * non-GW the codegen Phase 2 disables every action button. */
-    return m_gwProviderV2.get();
+    /* MF-205 (P1.23): returns the ProviderV2Variant by const reference —
+     * whichever of the 9 V2 providers is connected, or std::monostate
+     * when disconnected. The codegen-emitted wire_hardware_tab() does a
+     * std::visit over it; inside the visit lambda the held pointer is a
+     * concrete provider type, so wire_action<cap::X>'s capability gating
+     * stays structural per concrete type. */
+    return m_providerV2;
 }
 
 /* MF-202 (P1.22): HardwareTab::gwDevice() removed. The legacy `void*`
@@ -647,15 +661,23 @@ void HardwareTab::onConnect()
         #ifdef UFT_HAS_HAL
         qDebug() << "HardwareTab: Attempting GW V2 connection to" << port;
 
-        m_gwProviderV2 = std::make_unique<::uft::hal::GreaseweazleProviderV2>();
+        /* MF-205 (P1.23): construct the GW provider in a local
+         * unique_ptr, open() it, and only move it into m_providerV2 on
+         * success. `gwp` is a stable raw view — a unique_ptr move
+         * transfers ownership, not the pointed-to object — so it stays
+         * valid after the move into the variant. */
+        auto gwOwned = std::make_unique<::uft::hal::GreaseweazleProviderV2>();
+        ::uft::hal::GreaseweazleProviderV2 *gwp = gwOwned.get();
         std::string err;
-        if (m_gwProviderV2->open(port.toLocal8Bit().constData(), &err)) {
+        if (gwp->open(port.toLocal8Bit().constData(), &err)) {
+            /* Success: the variant takes ownership. */
+            m_providerV2 = std::move(gwOwned);
+
             /* Pull cached firmware/model out of the V2 provider. */
-            m_firmwareVersion =
-                QString::fromStdString(m_gwProviderV2->firmware_version());
+            m_firmwareVersion = QString::fromStdString(gwp->firmware_version());
             if (m_firmwareVersion.isEmpty())
                 m_firmwareVersion = QStringLiteral("Unknown");
-            m_hwModel = m_gwProviderV2->hardware_model();
+            m_hwModel = gwp->hardware_model();
 
             /* Re-run the codegen wiring so every capability-bound
              * button connects through the type-driven pipeline. */
@@ -670,7 +692,7 @@ void HardwareTab::onConnect()
                  * which we route through the existing onDetectOutcome /
                  * showProviderError handler set (MF-157 P1.4). No more
                  * direct uft_gw_select_drive / set_motor / seek loops. */
-                auto outcome = m_gwProviderV2->detect_drive();
+                auto outcome = gwp->detect_drive();
                 std::visit(::uft::hal::overloaded{
                     [this](const ::uft::hal::DriveDetected &v)            { onDetectOutcome(v); },
                     [this](const ::uft::hal::DriveAbsent &v)              { onDetectOutcome(v); },
@@ -689,10 +711,9 @@ void HardwareTab::onConnect()
             return;
         }
 
-        /* open() failed — release the (empty) provider so
-         * `currentProviderV2()` returns nullptr again, then surface
-         * the error. */
-        m_gwProviderV2.reset();
+        /* open() failed — `gwOwned` still owns the (unopened) provider
+         * and destructs at end of scope; m_providerV2 stays
+         * std::monostate. Surface the error. */
         const QString qerr = QString::fromStdString(err);
         qDebug() << "HardwareTab: GW V2 open failed:" << qerr;
         updateStatus(tr("Connection failed: %1").arg(qerr));
@@ -733,21 +754,27 @@ void HardwareTab::onDisconnect()
          * here so the motor doesn't keep spinning when the user is
          * already mid-disconnect. The outcome is intentionally
          * discarded — we are tearing the connection down anyway. */
-        if (m_gwProviderV2 && m_gwProviderV2->is_open()) {
-            (void)m_gwProviderV2->set_motor(false);
+        /* MF-205 (P1.23): a clean motor-off only applies to a connected
+         * Greaseweazle — the other V2 providers either have no
+         * ControlsMotor capability or are not yet routed. get_if yields
+         * the GW alternative or nullptr. */
+        if (auto *gwp = std::get_if<
+                std::unique_ptr<::uft::hal::GreaseweazleProviderV2>>(&m_providerV2);
+            gwp && *gwp && (*gwp)->is_open()) {
+            (void)(*gwp)->set_motor(false);
         }
         m_motorRunning = false;
     }
 
-    /* MF-171 (P1.18): the V2 provider owns the uft_gw_device_t* handle
-     * — its destructor (or close()) calls uft_gw_close(). HardwareTab
-     * no longer needs a separate "close the C handle" pass.
+    /* MF-171 (P1.18) / MF-205 (P1.23): the connected V2 provider owns
+     * its handle/transport — its destructor releases it. Assigning
+     * std::monostate destroys whichever alternative was active.
      *
      * Order:
-     *   1. unique_ptr.reset()  → destroys V2 wrapper → uft_gw_close()
-     *   2. rewireV2()          → Phase 1 disconnect, Phase 2 disable
-     *                            (provider now null) */
-    m_gwProviderV2.reset();
+     *   1. m_providerV2 = monostate → destroys the V2 provider
+     *   2. rewireV2()               → Phase 1 disconnect, Phase 2 disable
+     *                                 (provider now monostate) */
+    m_providerV2 = std::monostate{};
     rewireV2();
 
     m_connected = false;
@@ -885,10 +912,10 @@ void HardwareTab::showHardwareDisconnected(const ::uft::hal::HardwareDisconnecte
     updateStatus(tr("Hardware disconnected (%1)")
                      .arg(QString::fromStdString(d.device_path)),
                  /*isError=*/true);
-    /* The provider is gone. Tear down the V2 wrapper + rewire so the UI
-     * matches reality, then run the V1 disconnect for the rest of the
-     * legacy state (m_connected, m_gwDevice, etc.). */
-    m_gwProviderV2.reset();
+    /* The provider is gone. Tear down the V2 provider + rewire so the UI
+     * matches reality, then run the rest of the disconnect for the
+     * legacy state (m_connected etc.). MF-205: monostate = disconnected. */
+    m_providerV2 = std::monostate{};
     rewireV2();
     if (m_connected) {
         onDisconnect();
@@ -977,8 +1004,10 @@ void HardwareTab::onDetectionModeChanged()
          * dispatch the DetectOutcome through the same handler set the
          * codegen-wired btnDetect uses (mirrors onConnect's auto-detect
          * block). */
-        if (m_connected && m_gwProviderV2 && m_gwProviderV2->is_open()) {
-            auto outcome = m_gwProviderV2->detect_drive();
+        auto *gwp = std::get_if<
+            std::unique_ptr<::uft::hal::GreaseweazleProviderV2>>(&m_providerV2);
+        if (m_connected && gwp && *gwp && (*gwp)->is_open()) {
+            auto outcome = (*gwp)->detect_drive();
             std::visit(::uft::hal::overloaded{
                 [this](const ::uft::hal::DriveDetected &v)            { onDetectOutcome(v); },
                 [this](const ::uft::hal::DriveAbsent &v)              { onDetectOutcome(v); },

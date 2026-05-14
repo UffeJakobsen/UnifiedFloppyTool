@@ -16,6 +16,14 @@
 #include "hardwaretab.h"
 #include "ui_tab_hardware.h"
 #include "hardware_providers/greaseweazle_provider_v2.h"
+#include "hardware_providers/scp_provider_v2.h"
+#include "hardware_providers/kryoflux_provider_v2.h"
+#include "hardware_providers/fluxengine_provider_v2.h"
+#include "hardware_providers/fc5025_provider_v2.h"
+#include "hardware_providers/xum1541_provider_v2.h"
+#include "hardware_providers/applesauce_provider_v2.h"
+#include "hardware_providers/adfcopy_provider_v2.h"
+#include "hardware_providers/usbfloppy_provider_v2.h"
 
 #include "uft/gui/wiring_runtime.h"
 
@@ -40,11 +48,11 @@ void wire_hardware_tab(class HardwareTab *self) {
     QObject::disconnect(self->ui->btnReadTest, &QAbstractButton::clicked, nullptr, nullptr);
     QObject::disconnect(self->ui->btnSeekTest, &QAbstractButton::clicked, nullptr, nullptr);
 
-    auto *provider = self->currentProviderV2();
-    if (!provider) {
-        /* Phase 2 — no provider bound: disable every action
-         * button. They will be re-enabled by Phase 3 below on a
-         * later call when a V2 provider becomes available. */
+    const auto &providerVar = self->currentProviderV2();
+    if (std::holds_alternative<std::monostate>(providerVar)) {
+        /* Phase 2 — no provider connected (monostate): disable
+         * every action button. They are re-enabled by Phase 3
+         * on a later call once a V2 provider is connected. */
         self->ui->btnCalibrate->setEnabled(false);
         self->ui->btnDetect->setEnabled(false);
         self->ui->btnMotorOff->setEnabled(false);
@@ -55,94 +63,168 @@ void wire_hardware_tab(class HardwareTab *self) {
         return;
     }
 
-    /* Phase 3 — wire each action against the bound provider. */
+    /* Phase 3 — wire each action against the connected provider.
+     * std::visit dispatches on the active variant alternative;
+     * inside the lambda `p` is a CONCRETE provider pointer, so
+     * wire_action<cap::X> instantiates per concrete type and its
+     * capability gating stays 100% structural (rule H-3). */
     // widget=btnCalibrate  requires=Recalibrates  invoke=recalibrate()
-    wire_action<cap::Recalibrates>(
-        self->ui->btnCalibrate,
-        provider,
-        []<class P>(P *p) { return p->recalibrate(); },
-        /* on CapabilityRequiresPolicy: */ [self](const ::uft::hal::CapabilityRequiresPolicy &v) { self->showPolicyRequired(v); },
-        /* on HardwareDisconnected: */ [self](const ::uft::hal::HardwareDisconnected &v) { self->showHardwareDisconnected(v); },
-        /* on ProviderError: */ [self](const ::uft::hal::ProviderError &v) { self->showProviderError(v); },
-        /* on SeekArrived: */ [self](const ::uft::hal::SeekArrived &v) { self->onSeekOutcome(v); },
-        /* on SeekOvershot: */ [self](const ::uft::hal::SeekOvershot &v) { self->onSeekOutcome(v); },
-        /* on SeekTrack0Failed: */ [self](const ::uft::hal::SeekTrack0Failed &v) { self->onSeekOutcome(v); }
-    );
+    std::visit([&]<class HeldT>(const HeldT &held) {
+        if constexpr (std::is_same_v<HeldT, std::monostate>) {
+            /* Unreachable after the Phase-2 guard, but
+             * std::visit must be exhaustive — disable
+             * defensively. */
+            self->ui->btnCalibrate->setEnabled(false);
+        } else {
+            auto *p = held.get();  /* concrete provider* */
+            ::uft::gui::wire_action<cap::Recalibrates>(
+                self->ui->btnCalibrate,
+                p,
+                []<class P>(P *q) { return q->recalibrate(); },
+                /* on CapabilityRequiresPolicy: */ [self](const ::uft::hal::CapabilityRequiresPolicy &v) { self->showPolicyRequired(v); },
+                /* on HardwareDisconnected: */ [self](const ::uft::hal::HardwareDisconnected &v) { self->showHardwareDisconnected(v); },
+                /* on ProviderError: */ [self](const ::uft::hal::ProviderError &v) { self->showProviderError(v); },
+                /* on SeekArrived: */ [self](const ::uft::hal::SeekArrived &v) { self->onSeekOutcome(v); },
+                /* on SeekOvershot: */ [self](const ::uft::hal::SeekOvershot &v) { self->onSeekOutcome(v); },
+                /* on SeekTrack0Failed: */ [self](const ::uft::hal::SeekTrack0Failed &v) { self->onSeekOutcome(v); }
+            );
+        }
+    }, providerVar);
 
     // widget=btnDetect  requires=DetectsDrive  invoke=detect_drive()
-    wire_action<cap::DetectsDrive>(
-        self->ui->btnDetect,
-        provider,
-        []<class P>(P *p) { return p->detect_drive(); },
-        /* on CapabilityRequiresPolicy: */ [self](const ::uft::hal::CapabilityRequiresPolicy &v) { self->showPolicyRequired(v); },
-        /* on DriveAbsent: */ [self](const ::uft::hal::DriveAbsent &v) { self->onDetectOutcome(v); },
-        /* on DriveDetected: */ [self](const ::uft::hal::DriveDetected &v) { self->onDetectOutcome(v); },
-        /* on HardwareDisconnected: */ [self](const ::uft::hal::HardwareDisconnected &v) { self->showHardwareDisconnected(v); },
-        /* on ProviderError: */ [self](const ::uft::hal::ProviderError &v) { self->showProviderError(v); }
-    );
+    std::visit([&]<class HeldT>(const HeldT &held) {
+        if constexpr (std::is_same_v<HeldT, std::monostate>) {
+            /* Unreachable after the Phase-2 guard, but
+             * std::visit must be exhaustive — disable
+             * defensively. */
+            self->ui->btnDetect->setEnabled(false);
+        } else {
+            auto *p = held.get();  /* concrete provider* */
+            ::uft::gui::wire_action<cap::DetectsDrive>(
+                self->ui->btnDetect,
+                p,
+                []<class P>(P *q) { return q->detect_drive(); },
+                /* on CapabilityRequiresPolicy: */ [self](const ::uft::hal::CapabilityRequiresPolicy &v) { self->showPolicyRequired(v); },
+                /* on DriveAbsent: */ [self](const ::uft::hal::DriveAbsent &v) { self->onDetectOutcome(v); },
+                /* on DriveDetected: */ [self](const ::uft::hal::DriveDetected &v) { self->onDetectOutcome(v); },
+                /* on HardwareDisconnected: */ [self](const ::uft::hal::HardwareDisconnected &v) { self->showHardwareDisconnected(v); },
+                /* on ProviderError: */ [self](const ::uft::hal::ProviderError &v) { self->showProviderError(v); }
+            );
+        }
+    }, providerVar);
 
     // widget=btnMotorOff  requires=ControlsMotor  invoke=set_motor(false)
-    wire_action<cap::ControlsMotor>(
-        self->ui->btnMotorOff,
-        provider,
-        []<class P>(P *p) { return p->set_motor(false); },
-        /* on CapabilityRequiresPolicy: */ [self](const ::uft::hal::CapabilityRequiresPolicy &v) { self->showPolicyRequired(v); },
-        /* on HardwareDisconnected: */ [self](const ::uft::hal::HardwareDisconnected &v) { self->showHardwareDisconnected(v); },
-        /* on MotorRunning: */ [self](const ::uft::hal::MotorRunning &v) { self->onMotorOutcome(v); },
-        /* on MotorStalled: */ [self](const ::uft::hal::MotorStalled &v) { self->onMotorOutcome(v); },
-        /* on MotorStopped: */ [self](const ::uft::hal::MotorStopped &v) { self->onMotorOutcome(v); },
-        /* on ProviderError: */ [self](const ::uft::hal::ProviderError &v) { self->showProviderError(v); }
-    );
+    std::visit([&]<class HeldT>(const HeldT &held) {
+        if constexpr (std::is_same_v<HeldT, std::monostate>) {
+            /* Unreachable after the Phase-2 guard, but
+             * std::visit must be exhaustive — disable
+             * defensively. */
+            self->ui->btnMotorOff->setEnabled(false);
+        } else {
+            auto *p = held.get();  /* concrete provider* */
+            ::uft::gui::wire_action<cap::ControlsMotor>(
+                self->ui->btnMotorOff,
+                p,
+                []<class P>(P *q) { return q->set_motor(false); },
+                /* on CapabilityRequiresPolicy: */ [self](const ::uft::hal::CapabilityRequiresPolicy &v) { self->showPolicyRequired(v); },
+                /* on HardwareDisconnected: */ [self](const ::uft::hal::HardwareDisconnected &v) { self->showHardwareDisconnected(v); },
+                /* on MotorRunning: */ [self](const ::uft::hal::MotorRunning &v) { self->onMotorOutcome(v); },
+                /* on MotorStalled: */ [self](const ::uft::hal::MotorStalled &v) { self->onMotorOutcome(v); },
+                /* on MotorStopped: */ [self](const ::uft::hal::MotorStopped &v) { self->onMotorOutcome(v); },
+                /* on ProviderError: */ [self](const ::uft::hal::ProviderError &v) { self->showProviderError(v); }
+            );
+        }
+    }, providerVar);
 
     // widget=btnMotorOn  requires=ControlsMotor  invoke=set_motor(true)
-    wire_action<cap::ControlsMotor>(
-        self->ui->btnMotorOn,
-        provider,
-        []<class P>(P *p) { return p->set_motor(true); },
-        /* on CapabilityRequiresPolicy: */ [self](const ::uft::hal::CapabilityRequiresPolicy &v) { self->showPolicyRequired(v); },
-        /* on HardwareDisconnected: */ [self](const ::uft::hal::HardwareDisconnected &v) { self->showHardwareDisconnected(v); },
-        /* on MotorRunning: */ [self](const ::uft::hal::MotorRunning &v) { self->onMotorOutcome(v); },
-        /* on MotorStalled: */ [self](const ::uft::hal::MotorStalled &v) { self->onMotorOutcome(v); },
-        /* on MotorStopped: */ [self](const ::uft::hal::MotorStopped &v) { self->onMotorOutcome(v); },
-        /* on ProviderError: */ [self](const ::uft::hal::ProviderError &v) { self->showProviderError(v); }
-    );
+    std::visit([&]<class HeldT>(const HeldT &held) {
+        if constexpr (std::is_same_v<HeldT, std::monostate>) {
+            /* Unreachable after the Phase-2 guard, but
+             * std::visit must be exhaustive — disable
+             * defensively. */
+            self->ui->btnMotorOn->setEnabled(false);
+        } else {
+            auto *p = held.get();  /* concrete provider* */
+            ::uft::gui::wire_action<cap::ControlsMotor>(
+                self->ui->btnMotorOn,
+                p,
+                []<class P>(P *q) { return q->set_motor(true); },
+                /* on CapabilityRequiresPolicy: */ [self](const ::uft::hal::CapabilityRequiresPolicy &v) { self->showPolicyRequired(v); },
+                /* on HardwareDisconnected: */ [self](const ::uft::hal::HardwareDisconnected &v) { self->showHardwareDisconnected(v); },
+                /* on MotorRunning: */ [self](const ::uft::hal::MotorRunning &v) { self->onMotorOutcome(v); },
+                /* on MotorStalled: */ [self](const ::uft::hal::MotorStalled &v) { self->onMotorOutcome(v); },
+                /* on MotorStopped: */ [self](const ::uft::hal::MotorStopped &v) { self->onMotorOutcome(v); },
+                /* on ProviderError: */ [self](const ::uft::hal::ProviderError &v) { self->showProviderError(v); }
+            );
+        }
+    }, providerVar);
 
     // widget=btnRPMTest  requires=MeasuresRPM  invoke=measure_rpm()
-    wire_action<cap::MeasuresRPM>(
-        self->ui->btnRPMTest,
-        provider,
-        []<class P>(P *p) { return p->measure_rpm(); },
-        /* on CapabilityRequiresPolicy: */ [self](const ::uft::hal::CapabilityRequiresPolicy &v) { self->showPolicyRequired(v); },
-        /* on HardwareDisconnected: */ [self](const ::uft::hal::HardwareDisconnected &v) { self->showHardwareDisconnected(v); },
-        /* on ProviderError: */ [self](const ::uft::hal::ProviderError &v) { self->showProviderError(v); },
-        /* on RpmMeasured: */ [self](const ::uft::hal::RpmMeasured &v) { self->onRpmOutcome(v); }
-    );
+    std::visit([&]<class HeldT>(const HeldT &held) {
+        if constexpr (std::is_same_v<HeldT, std::monostate>) {
+            /* Unreachable after the Phase-2 guard, but
+             * std::visit must be exhaustive — disable
+             * defensively. */
+            self->ui->btnRPMTest->setEnabled(false);
+        } else {
+            auto *p = held.get();  /* concrete provider* */
+            ::uft::gui::wire_action<cap::MeasuresRPM>(
+                self->ui->btnRPMTest,
+                p,
+                []<class P>(P *q) { return q->measure_rpm(); },
+                /* on CapabilityRequiresPolicy: */ [self](const ::uft::hal::CapabilityRequiresPolicy &v) { self->showPolicyRequired(v); },
+                /* on HardwareDisconnected: */ [self](const ::uft::hal::HardwareDisconnected &v) { self->showHardwareDisconnected(v); },
+                /* on ProviderError: */ [self](const ::uft::hal::ProviderError &v) { self->showProviderError(v); },
+                /* on RpmMeasured: */ [self](const ::uft::hal::RpmMeasured &v) { self->onRpmOutcome(v); }
+            );
+        }
+    }, providerVar);
 
     // widget=btnReadTest  requires=ReadsRawFlux  invoke=read_raw_flux(::uft::hal::ReadFluxParams{40, 0, 2, 0})
-    wire_action<cap::ReadsRawFlux>(
-        self->ui->btnReadTest,
-        provider,
-        []<class P>(P *p) { return p->read_raw_flux(::uft::hal::ReadFluxParams{40, 0, 2, 0}); },
-        /* on CapabilityRequiresPolicy: */ [self](const ::uft::hal::CapabilityRequiresPolicy &v) { self->showPolicyRequired(v); },
-        /* on FluxCaptured: */ [self](const ::uft::hal::FluxCaptured &v) { self->onFluxOutcome(v); },
-        /* on FluxMarginal: */ [self](const ::uft::hal::FluxMarginal &v) { self->onFluxOutcome(v); },
-        /* on FluxUnreadable: */ [self](const ::uft::hal::FluxUnreadable &v) { self->onFluxOutcome(v); },
-        /* on HardwareDisconnected: */ [self](const ::uft::hal::HardwareDisconnected &v) { self->showHardwareDisconnected(v); },
-        /* on ProviderError: */ [self](const ::uft::hal::ProviderError &v) { self->showProviderError(v); }
-    );
+    std::visit([&]<class HeldT>(const HeldT &held) {
+        if constexpr (std::is_same_v<HeldT, std::monostate>) {
+            /* Unreachable after the Phase-2 guard, but
+             * std::visit must be exhaustive — disable
+             * defensively. */
+            self->ui->btnReadTest->setEnabled(false);
+        } else {
+            auto *p = held.get();  /* concrete provider* */
+            ::uft::gui::wire_action<cap::ReadsRawFlux>(
+                self->ui->btnReadTest,
+                p,
+                []<class P>(P *q) { return q->read_raw_flux(::uft::hal::ReadFluxParams{40, 0, 2, 0}); },
+                /* on CapabilityRequiresPolicy: */ [self](const ::uft::hal::CapabilityRequiresPolicy &v) { self->showPolicyRequired(v); },
+                /* on FluxCaptured: */ [self](const ::uft::hal::FluxCaptured &v) { self->onFluxOutcome(v); },
+                /* on FluxMarginal: */ [self](const ::uft::hal::FluxMarginal &v) { self->onFluxOutcome(v); },
+                /* on FluxUnreadable: */ [self](const ::uft::hal::FluxUnreadable &v) { self->onFluxOutcome(v); },
+                /* on HardwareDisconnected: */ [self](const ::uft::hal::HardwareDisconnected &v) { self->showHardwareDisconnected(v); },
+                /* on ProviderError: */ [self](const ::uft::hal::ProviderError &v) { self->showProviderError(v); }
+            );
+        }
+    }, providerVar);
 
     // widget=btnSeekTest  requires=SeeksHead  invoke=seek(40)
-    wire_action<cap::SeeksHead>(
-        self->ui->btnSeekTest,
-        provider,
-        []<class P>(P *p) { return p->seek(40); },
-        /* on CapabilityRequiresPolicy: */ [self](const ::uft::hal::CapabilityRequiresPolicy &v) { self->showPolicyRequired(v); },
-        /* on HardwareDisconnected: */ [self](const ::uft::hal::HardwareDisconnected &v) { self->showHardwareDisconnected(v); },
-        /* on ProviderError: */ [self](const ::uft::hal::ProviderError &v) { self->showProviderError(v); },
-        /* on SeekArrived: */ [self](const ::uft::hal::SeekArrived &v) { self->onSeekOutcome(v); },
-        /* on SeekOvershot: */ [self](const ::uft::hal::SeekOvershot &v) { self->onSeekOutcome(v); },
-        /* on SeekTrack0Failed: */ [self](const ::uft::hal::SeekTrack0Failed &v) { self->onSeekOutcome(v); }
-    );
+    std::visit([&]<class HeldT>(const HeldT &held) {
+        if constexpr (std::is_same_v<HeldT, std::monostate>) {
+            /* Unreachable after the Phase-2 guard, but
+             * std::visit must be exhaustive — disable
+             * defensively. */
+            self->ui->btnSeekTest->setEnabled(false);
+        } else {
+            auto *p = held.get();  /* concrete provider* */
+            ::uft::gui::wire_action<cap::SeeksHead>(
+                self->ui->btnSeekTest,
+                p,
+                []<class P>(P *q) { return q->seek(40); },
+                /* on CapabilityRequiresPolicy: */ [self](const ::uft::hal::CapabilityRequiresPolicy &v) { self->showPolicyRequired(v); },
+                /* on HardwareDisconnected: */ [self](const ::uft::hal::HardwareDisconnected &v) { self->showHardwareDisconnected(v); },
+                /* on ProviderError: */ [self](const ::uft::hal::ProviderError &v) { self->showProviderError(v); },
+                /* on SeekArrived: */ [self](const ::uft::hal::SeekArrived &v) { self->onSeekOutcome(v); },
+                /* on SeekOvershot: */ [self](const ::uft::hal::SeekOvershot &v) { self->onSeekOutcome(v); },
+                /* on SeekTrack0Failed: */ [self](const ::uft::hal::SeekTrack0Failed &v) { self->onSeekOutcome(v); }
+            );
+        }
+    }, providerVar);
 
 }  // wire_hardware_tab
 

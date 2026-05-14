@@ -20,6 +20,7 @@
 #include <QButtonGroup>
 
 #include <memory>
+#include <variant>
 
 #include "uft/hal/outcomes.h"   /* forensic Sum-Types — handlers take refs */
 
@@ -30,10 +31,35 @@ class HardwareTab;              /* fwd-decl needed before the codegen
 struct DetectedDriveInfo;
 struct HardwareInfo;
 
-/* MF-157 — see src/hardware_providers/greaseweazle_provider_v2.h.
- * The V2 type lives in `uft::hal` (not the global namespace), so the
- * forward declaration must enter the right namespace. */
-namespace uft::hal { class GreaseweazleProviderV2; }
+/* MF-205 (P1.23): all 9 V2 provider types are forward-declared here.
+ * They share NO base class (the type-driven design makes capabilities a
+ * type-property, not a virtual method), so "the currently-connected
+ * provider, whichever of the 9 it is" is modelled as a std::variant of
+ * std::unique_ptr — the active alternative IS the "which controller is
+ * connected" fact, and the unique_ptr gives RAII + stays movable even
+ * though several providers (Greaseweazle, SCP) delete their move ops.
+ * std::monostate (first) = "disconnected". The variant's destructor
+ * needs the complete types — HardwareTab's destructor is defined in
+ * hardwaretab.cpp, which #includes all 9 provider headers. */
+namespace uft::hal {
+    class GreaseweazleProviderV2; class SCPProviderV2;
+    class KryoFluxProviderV2;     class FluxEngineProviderV2;
+    class FC5025ProviderV2;       class XUM1541ProviderV2;
+    class ApplesauceProviderV2;   class ADFCopyProviderV2;
+    class USBFloppyProviderV2;
+}
+
+using ProviderV2Variant = std::variant<
+    std::monostate,
+    std::unique_ptr<::uft::hal::GreaseweazleProviderV2>,
+    std::unique_ptr<::uft::hal::SCPProviderV2>,
+    std::unique_ptr<::uft::hal::KryoFluxProviderV2>,
+    std::unique_ptr<::uft::hal::FluxEngineProviderV2>,
+    std::unique_ptr<::uft::hal::FC5025ProviderV2>,
+    std::unique_ptr<::uft::hal::XUM1541ProviderV2>,
+    std::unique_ptr<::uft::hal::ApplesauceProviderV2>,
+    std::unique_ptr<::uft::hal::ADFCopyProviderV2>,
+    std::unique_ptr<::uft::hal::USBFloppyProviderV2>>;
 
 /* MF-157 (P1.4): forward-declaration of the codegen-emitted wire-up
  * function. Implemented in generated/tab_hardware_wiring.gen.cpp (output
@@ -88,19 +114,24 @@ public:
     int getHardwareModel() const { return m_hwModel; }
 
     /* ──────────────────────────────────────────────────────────────────
-     *  MF-157 (P1.4) — Type-Driven HAL V2 surface
+     *  MF-157 (P1.4) / MF-205 (P1.23) — Type-Driven HAL V2 surface
      *
      *  `currentProviderV2()` is the single accessor consumed by the
      *  codegen-emitted `wire_hardware_tab(self)` (see
      *  `forms/tab_hardware.actions.yaml`'s `provider_source:` entry).
-     *  It returns the GreaseweazleProviderV2 instance when the GW
-     *  controller is connected, and nullptr otherwise.
+     *
+     *  MF-205 (P1.23): it now returns the `ProviderV2Variant` by const
+     *  reference — whichever of the 9 V2 providers is connected, or
+     *  `std::monostate` when disconnected. The codegen `std::visit`s it:
+     *  inside the visit lambda the pointer is a concrete provider type,
+     *  so `wire_action<cap::X>` still instantiates per concrete type and
+     *  its capability gating stays 100% structural.
      *
      *  The handler overload set below is invoked by the codegen-emitted
-     *  std::visit dispatch (one overload per variant alternative). Each
-     *  handler is RESPONSIBLE for surfacing the forensic detail of its
-     *  variant — never collapse `SectorMarginal`'s divergent_reads to a
-     *  single sample (rule F-3), never reduce ProviderError to one line
+     *  std::visit dispatch (one overload per Outcome-variant alternative).
+     *  Each handler is RESPONSIBLE for surfacing the forensic detail of
+     *  its variant — never collapse `SectorMarginal`'s divergent_reads to
+     *  a single sample (rule F-3), never reduce ProviderError to one line
      *  (rule F-4 — what / why / fix all surfaced).
      *
      *  Adding a new alternative to a Sum-Type in `outcomes.h` will fail
@@ -108,7 +139,7 @@ public:
      *  forensic contract turning "we should preserve every case" into a
      *  build break.
      * ────────────────────────────────────────────────────────────────── */
-    ::uft::hal::GreaseweazleProviderV2 *currentProviderV2() const noexcept;
+    const ProviderV2Variant &currentProviderV2() const noexcept;
 
     /* MotorOutcome variant — one overload per alternative (excl. shared
      * ProviderError / HardwareDisconnected / CapabilityRequiresPolicy
@@ -249,24 +280,16 @@ private:
     QString m_firmwareVersion;
     int m_hwModel;              // Hardware model (e.g., F1=1, F7=7)
 
-    /* MF-169 (P1.17): The V1 `HardwareManager` dispatcher was deleted
-     * with the V1 provider hierarchy. Routing for non-Greaseweazle
-     * controllers via V2 providers is task P1.18 — until then those
-     * controllers display a "no V2 routing wired" message on Connect. */
-
-    /* MF-157 (P1.4): V2 mixin-composition wrapper around the
-     * Greaseweazle device.
-     * MF-171 (P1.18): the provider OWNS the uft_gw_device_t* handle —
-     * the V1 `m_gwDevice void*` member is gone.
-     * MF-200/201/202 (P1.20–22): FluxCaptureJob / FluxWriteJob now take
-     * a non-owning `GreaseweazleProviderV2*` (via currentProviderV2())
-     * and drive it through the V2 outcome surface; the gwDevice() /
-     * raw_handle() escape hatch is removed. This unique_ptr is the sole
-     * owner. The forward-declared dtor in greaseweazle_provider_v2.h is
-     * sufficient for unique_ptr's destructor instantiation here because
-     * HardwareTab's destructor is defined in hardwaretab.cpp where the
-     * V2 type is complete. */
-    std::unique_ptr<::uft::hal::GreaseweazleProviderV2> m_gwProviderV2;
+    /* MF-157 (P1.4): V2 mixin-composition wrapper around the connected
+     * controller. MF-205 (P1.23): the single
+     * `unique_ptr<GreaseweazleProviderV2>` member became a
+     * `ProviderV2Variant` — the active alternative is whichever of the 9
+     * V2 providers is connected (or `std::monostate` = disconnected).
+     * The provider OWNS its handle/transport (MF-171); the unique_ptr is
+     * the sole owner. The variant's destructor needs the complete
+     * provider types — HardwareTab's destructor is defined in
+     * hardwaretab.cpp, which #includes all 9 provider headers. */
+    ProviderV2Variant m_providerV2;
 
     /* Re-runs `wire_hardware_tab(this)` so Phase-1 disconnect, Phase-2
      * disable, and Phase-3 wire-up reflect the current `currentProviderV2()`.

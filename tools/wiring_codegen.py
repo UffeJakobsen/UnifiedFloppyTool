@@ -408,16 +408,18 @@ def emit(spec: dict[str, Any], ui_rel: str, yaml_rel: str) -> str:
         )
     parts.append("\n")
 
-    # ── Phase 2: provider-null gate ───────────────────────────────────
-    # Disable every action button when no V2 provider is bound. Keeps
-    # the UI consistent with reality (rule H-1) without requiring the
-    # caller to know which buttons are capability-bound.
+    # ── Phase 2: provider-disconnected gate ───────────────────────────
+    # MF-205 (P1.23): provider_source now yields a ProviderV2Variant
+    # (std::variant<std::monostate, unique_ptr<...>x9>). "No provider
+    # connected" is the std::monostate alternative. Disable every action
+    # button in that case. Keeps the UI consistent with reality (rule
+    # H-1) without the caller knowing which buttons are capability-bound.
     parts.append(
-        f"    auto *provider = {provider_source};\n"
-        "    if (!provider) {\n"
-        "        /* Phase 2 — no provider bound: disable every action\n"
-        "         * button. They will be re-enabled by Phase 3 below on a\n"
-        "         * later call when a V2 provider becomes available. */\n"
+        f"    const auto &providerVar = {provider_source};\n"
+        "    if (std::holds_alternative<std::monostate>(providerVar)) {\n"
+        "        /* Phase 2 — no provider connected (monostate): disable\n"
+        "         * every action button. They are re-enabled by Phase 3\n"
+        "         * on a later call once a V2 provider is connected. */\n"
     )
     for a in sorted_actions:
         parts.append(
@@ -427,22 +429,39 @@ def emit(spec: dict[str, Any], ui_rel: str, yaml_rel: str) -> str:
         "        return;\n"
         "    }\n"
         "\n"
-        "    /* Phase 3 — wire each action against the bound provider. */\n"
+        "    /* Phase 3 — wire each action against the connected provider.\n"
+        "     * std::visit dispatches on the active variant alternative;\n"
+        "     * inside the lambda `p` is a CONCRETE provider pointer, so\n"
+        "     * wire_action<cap::X> instantiates per concrete type and its\n"
+        "     * capability gating stays 100% structural (rule H-3). */\n"
     )
 
     # ── Phase 3: per-action wire_action emission ──────────────────────
+    # MF-205 (P1.23): each wire_action<cap::X> call is wrapped in a
+    # std::visit over the variant. The INNER emission (wire_action, the
+    # generic-lambda factory, the per-alternative handlers) is unchanged
+    # from the pre-P1.23 codegen — only the std::visit shell + the
+    # `provider` -> `p` substitution are new.
     for a in sorted_actions:
         widget = a["widget"]
         cap = a["requires"]
         invoke = a["invoke"]
         parts.append(
             f"    // widget={widget}  requires={cap}  invoke={invoke}\n"
-            f"    wire_action<cap::{cap}>(\n"
-            f"        self->ui->{widget},\n"
-            f"        provider,\n"
+            f"    std::visit([&]<class HeldT>(const HeldT &held) {{\n"
+            f"        if constexpr (std::is_same_v<HeldT, std::monostate>) {{\n"
+            f"            /* Unreachable after the Phase-2 guard, but\n"
+            f"             * std::visit must be exhaustive — disable\n"
+            f"             * defensively. */\n"
+            f"            self->ui->{widget}->setEnabled(false);\n"
+            f"        }} else {{\n"
+            f"            auto *p = held.get();  /* concrete provider* */\n"
+            f"            ::uft::gui::wire_action<cap::{cap}>(\n"
+            f"                self->ui->{widget},\n"
+            f"                p,\n"
             # Generic-lambda invoke factory: body type-checked lazily —
             # see WHY INVOKE IS A GENERIC LAMBDA in wiring_runtime.h.
-            f"        []<class P>(P *p) {{ return p->{invoke}; }}"
+            f"                []<class P>(P *q) {{ return q->{invoke}; }}"
         )
         on = a.get("on_outcome", {}) or {}
         if on:
@@ -453,14 +472,14 @@ def emit(spec: dict[str, Any], ui_rel: str, yaml_rel: str) -> str:
                     # Concrete-typed handler: one alternative of the variant
                     # by const-ref. std::visit enforces exhaustiveness — a
                     # missing alternative fails to compile.
-                    f"        /* on {alt}: */ "
+                    f"                /* on {alt}: */ "
                     f"[self](const ::uft::hal::{alt} &v) {{ {handler}; }},\n"
                 )
             # remove trailing ',\n' on the last handler line
             parts[-1] = parts[-1].rstrip(",\n") + "\n"
         else:
             parts.append("\n")
-        parts.append("    );\n\n")
+        parts.append("            );\n        }\n    }, providerVar);\n\n")
 
     parts.append(FOOTER.format(tab_snake=camel_to_snake(tab)))
     return "".join(parts)

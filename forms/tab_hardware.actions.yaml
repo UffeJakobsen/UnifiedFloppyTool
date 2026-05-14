@@ -62,18 +62,27 @@ tab: HardwareTab
 provider_source: self->currentProviderV2()
 
 # Headers the generated TU needs in addition to wiring_runtime.h:
-#   hardwaretab.h         — HardwareTab class (declares ui-pointer + handler
-#                           overloads + friend declaration for the
-#                           generated function)
+#   hardwaretab.h         — HardwareTab class + the ProviderV2Variant typedef
+#                           (declares ui-pointer + handler overloads + friend
+#                           declaration for the generated function)
 #   ui_tab_hardware.h     — uic-generated complete type for Ui::TabHardware
-#                           (the .ui's `<class>` is `TabHardware`, hence the
-#                           filename pattern from qmake's UIC step)
-#   greaseweazle_provider_v2.h — concrete V2 type for the wire_action<Cap>
-#                                instantiations against GW
+#   *_provider_v2.h (x9)  — MF-205 (P1.23): the codegen std::visit's the
+#                           ProviderV2Variant; inside the visit lambda
+#                           wire_action<cap::X> instantiates against the
+#                           CONCRETE provider type, which must be complete.
+#                           All 9 V2 provider headers are therefore needed.
 extra_includes:
   - hardwaretab.h
   - ui_tab_hardware.h
   - hardware_providers/greaseweazle_provider_v2.h
+  - hardware_providers/scp_provider_v2.h
+  - hardware_providers/kryoflux_provider_v2.h
+  - hardware_providers/fluxengine_provider_v2.h
+  - hardware_providers/fc5025_provider_v2.h
+  - hardware_providers/xum1541_provider_v2.h
+  - hardware_providers/applesauce_provider_v2.h
+  - hardware_providers/adfcopy_provider_v2.h
+  - hardware_providers/usbfloppy_provider_v2.h
 
 actions:
 
