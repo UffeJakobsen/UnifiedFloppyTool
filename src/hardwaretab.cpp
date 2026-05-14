@@ -292,8 +292,13 @@ void HardwareTab::populateControllerList()
 
     // === Commodore Controllers (IEC/IEEE-488) ===
     ui->comboController->addItem(tr("── Commodore USB ──"), "separator_cbm_usb");
-    ui->comboController->addItem(tr("ZoomFloppy"), "zoomfloppy");
-    ui->comboController->addItem(tr("XUM1541 / XUM1541-II"), "xum1541");
+    /* MF-180 (P1.19 follow-up): ZoomFloppy and XUM1541 are one hardware
+     * family — ZoomFloppy runs xum1541 firmware and speaks the identical
+     * OpenCBM protocol. There is exactly one V2 provider, XUM1541ProviderV2;
+     * the former separate "zoomfloppy" controller-key had no provider of
+     * its own. Merged into a single entry, analogous to the single
+     * "Greaseweazle (F1/F7)" entry that covers multiple GW models. */
+    ui->comboController->addItem(tr("XUM1541 / XUM1541-II / ZoomFloppy"), "xum1541");
 
     /* MF-170 (P1.19): legacy parallel-port X1541 family (XA/XAP/XM/XE/
      * X1541) removed from the controller combo. The five entries had
@@ -924,7 +929,7 @@ void HardwareTab::onControllerChanged(int index)
      * MF-170 (P1.19): the LPT-based X1541 family was removed from the
      * combo; `isCommodoreLPT` would always be false and is therefore
      * gone. `isCommodore == isCommodoreUSB` now. */
-    bool isCommodoreUSB = (controller == "zoomfloppy" || controller == "xum1541");
+    bool isCommodoreUSB = (controller == "xum1541");
     bool isCommodore = isCommodoreUSB;
     bool isFlux = (controller == "greaseweazle" || controller == "scp" ||
                    controller == "kryoflux" || controller == "fluxengine");
