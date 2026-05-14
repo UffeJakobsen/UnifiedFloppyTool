@@ -48,7 +48,6 @@
 Q_LOGGING_CATEGORY(lcHwSerial, "uft.hw.serial", QtWarningMsg)
 #include <QFileInfo>
 #include <QStandardItemModel>
-#include <cstdio>  // For printf debugging
 
 #ifdef UFT_HAS_SERIALPORT
 #include <QSerialPortInfo>
@@ -571,12 +570,6 @@ void HardwareTab::onConnect()
     QString port = ui->comboPort->currentData().toString();
     QString controller = ui->comboController->currentData().toString();
     
-    // Use both printf and qDebug to ensure output is visible
-    printf("=== onConnect called ===\n");
-    printf("Port: %s\n", port.toUtf8().constData());
-    printf("Controller: %s\n", controller.toUtf8().constData());
-    fflush(stdout);
-    
     qDebug() << "=== onConnect called ===";
     qDebug() << "Port:" << port;
     qDebug() << "Controller data:" << controller;
@@ -646,8 +639,6 @@ void HardwareTab::onConnect()
 
     if (controller == "greaseweazle") {
         qDebug() << "YES - using HAL connection";
-        printf(">>> Entering HAL connection code path\n");
-        fflush(stdout);
         // Real HAL connection attempt — MF-171 (P1.18) via V2 provider lifecycle
         #ifdef UFT_HAS_HAL
         qDebug() << "HardwareTab: Attempting GW V2 connection to" << port;

@@ -353,12 +353,16 @@ DetectOutcome FC5025ProviderV2::do_detect_drive()
         detected.drive_kind = "5.25\" DD/SD (FC5025 read-only controller)";
     }
 
-    /* The FC5025 supports 5.25" drives (35-40 cylinders) and 8" drives
-     * (77 cylinders). Default to 5.25" DD geometry (most common use case).
-     * The runner may provide more precise geometry if it queried the firmware. */
-    detected.tracks      = 40;    /* 5.25" DD standard: 40 cylinders */
-    detected.heads       = 2;     /* Standard 2-sided floppy */
-    detected.rpm_nominal = 300.0; /* 5.25" DD and 8" DSDD: 300 RPM */
+    /* The FC5025 firmware does not report drive geometry, and
+     * Fc5025DetectResult carries no tracks/heads/rpm fields — so detect
+     * cannot determine geometry. Report 0 = "not auto-detected" (the
+     * same sentinel GreaseweazleProviderV2::do_detect_drive uses on a
+     * no-RPM-signal result) rather than fabricating a 5.25" DD default.
+     * The user-selected disk_format determines the actual geometry
+     * downstream — see audit finding ARCH-5 / FC-D5-3. */
+    detected.tracks      = 0;
+    detected.heads       = 0;
+    detected.rpm_nominal = 0.0;
 
     /* Firmware version from direct USB probe (empty in CLI mode). */
     if (!result.firmware.empty()) {
