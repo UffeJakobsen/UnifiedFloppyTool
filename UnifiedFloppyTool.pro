@@ -381,6 +381,8 @@ SOURCES += generated/tab_hardware_wiring.gen.cpp
 
 # USB Floppy UFI Backend (C)
 SOURCES += src/hal/ufi.c
+SOURCES += src/hal/ufi_backend.c
+SOURCES += src/hal/ufi_linux.c
 
 # Hardware Provider Headers (CRITICAL for MOC!)
 HEADERS += \
