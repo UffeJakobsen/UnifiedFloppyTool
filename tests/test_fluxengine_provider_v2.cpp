@@ -304,7 +304,11 @@ static void smoke_read_raw_flux_happy_path()
     const std::string raw_flux = "\x01\x02\x03\x04\x05\x06\x07\x08";
 
     mock.queue_run(SubprocessMock::ScriptedRun{
-        { "fluxengine", "read", "--revs=2" },  /* subseq: binary + read + revs */
+        /* MF-178: corrected FluxEngine CLI — the revolutions flag is now
+         * `--drive.revolutions=N`; the pre-2022 `--revs=N` form was
+         * silently rejected by every FluxEngine release since the CLI
+         * refactor. See tests/external_audits/fluxengine/REPORT.md F1. */
+        { "fluxengine", "read", "--drive.revolutions=2" },
         raw_flux,   /* stdout_reply = raw flux bytes */
         "",
         0

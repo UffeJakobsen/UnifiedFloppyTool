@@ -131,6 +131,36 @@ FluxOutcome FluxEngineProviderV2::fe_range_error_flux(int cylinder, int head) co
     };
 }
 
+/*
+ * MF-178: FluxEngine CLI syntax corrected.
+ *
+ * The V1 provider — and the P1.10 V2 migration that faithfully wrapped
+ * it — emitted pre-2022 FluxEngine syntax:
+ *     read  ibm -s drive:0 -c N -h H --revs=R -o out.flux
+ *     write ibm -d drive:0 -c N -h H -i in.flux
+ * Every flag in that form is wrong for current FluxEngine:
+ *   - `ibm` as a positional      → FE takes no positional after read/write;
+ *                                   the profile is selected with `-c <name>`.
+ *   - `-c N` (numeric)           → `-c` LOADS a config/profile by name;
+ *                                   a numeric value makes FE look for a
+ *                                   profile literally named "N".
+ *   - `-h H`                     → not a flag for read/write at all.
+ *   - `--revs=R`                 → renamed to `--drive.revolutions=R`.
+ * Cylinder/head are now selected with `--tracks=cNhM`.
+ *
+ * Corrected forms (per the UFT ↔ FluxEngine compatibility audit,
+ * 2026-05-14, tests/external_audits/fluxengine/REPORT.md, findings
+ * F1+F2):
+ *     read  -c ibm -s drive:0 --tracks=cNhM --drive.revolutions=R -o out
+ *     write -c ibm -d drive:0 --tracks=cNhM -i in
+ *
+ * VERIFICATION STATUS: the corrected syntax was derived from reading
+ * FluxEngine's own flag-definition source (fe-*.cc) + command registry
+ * (fluxengine.cc) and validated against the audit's mock_fluxengine.py.
+ * It has NOT yet been end-to-end-tested against a real `fluxengine`
+ * binary — that is the deferred Stufe-5 / HIL check. If a real-FE test
+ * ever contradicts this, THIS is the function to fix.
+ */
 std::vector<std::string> FluxEngineProviderV2::build_read_argv(
     int cylinder, int head, int revolutions,
     const std::string& output_path) const
@@ -138,14 +168,13 @@ std::vector<std::string> FluxEngineProviderV2::build_read_argv(
     std::vector<std::string> args;
     args.push_back(m_fe_binary);
     args.push_back("read");
-    args.push_back("ibm");    /* default format profile for raw track capture */
+    args.push_back("-c");
+    args.push_back("ibm");    /* profile loaded by name (was: positional) */
     args.push_back("-s");
     args.push_back("drive:0");
-    args.push_back("-c");
-    args.push_back(std::to_string(cylinder));
-    args.push_back("-h");
-    args.push_back(std::to_string(head));
-    args.push_back("--revs=" + std::to_string(revolutions));
+    args.push_back("--tracks=c" + std::to_string(cylinder)
+                   + "h" + std::to_string(head));
+    args.push_back("--drive.revolutions=" + std::to_string(revolutions));
     args.push_back("-o");
     args.push_back(output_path);
     return args;
@@ -157,13 +186,12 @@ std::vector<std::string> FluxEngineProviderV2::build_write_argv(
     std::vector<std::string> args;
     args.push_back(m_fe_binary);
     args.push_back("write");
-    args.push_back("ibm");    /* default format profile for raw flux write */
+    args.push_back("-c");
+    args.push_back("ibm");    /* profile loaded by name (was: positional) */
     args.push_back("-d");
     args.push_back("drive:0");
-    args.push_back("-c");
-    args.push_back(std::to_string(cylinder));
-    args.push_back("-h");
-    args.push_back(std::to_string(head));
+    args.push_back("--tracks=c" + std::to_string(cylinder)
+                   + "h" + std::to_string(head));
     args.push_back("-i");
     args.push_back(input_path);
     return args;
