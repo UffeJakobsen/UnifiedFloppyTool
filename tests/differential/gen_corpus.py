@@ -52,7 +52,7 @@ CORPUS_SPEC = [
     ("ibm_dd",       ".img",  737280,   "ibm.720"),            # 80*2*9*512
     ("ibm_hd",       ".img",  1474560,  "ibm.1440"),           # 80*2*18*512
     ("amiga_dd",     ".adf",  901120,   "amiga.amigados"),     # 80*2*11*512
-    ("c64_gcr",      ".d64",  174848,   "commodore.1541"),     # standard 35-track .d64
+    ("c64_gcr",      ".d64",  196608,   "commodore.1541"),     # 40-track .d64: gw's commodore.1541 diskdef is 768 sectors (17*21+7*19+6*18+10*17)
     ("apple2_525",   ".do",   143360,   "apple2.appledos.140"),# 35*16*256
     ("atarist_dd",   ".st",   737280,   "atarist.720"),        # 80*2*9*512
 ]

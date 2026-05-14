@@ -11,26 +11,30 @@
  *   usage: uft_flux_decode <in.scp> <encoding> <out.img>
  *                          <heads> <spt> <secsize> <first_sec> [bitcell_ns]
  *
- *   encoding   : mfm   (the only encoding wired so far — see below)
- *   heads      : 1 or 2
- *   spt        : sectors per track (uniform geometry only)
- *   secsize    : bytes per sector (e.g. 512)
- *   first_sec  : first sector number on the disk (IBM/AtariST = 1)
- *   bitcell_ns : MFM bit-cell time; 0 = decoder default (DD). HD ~1000.
+ *   encoding   : mfm      uniform-geometry IBM-style MFM (IBM-DD/HD, AtariST)
+ *                gcr_c64  Commodore 1541 GCR (zone geometry, 40-track .d64)
+ *                (gcr_apple / amiga exit 3 — see SCOPE below)
+ *   heads      : 1 or 2          (mfm only; ignored for gcr_c64)
+ *   spt        : sectors/track   (mfm only; gcr_c64 is zone geometry)
+ *   secsize    : bytes/sector    (mfm only; gcr_c64 fixed 256)
+ *   first_sec  : first sector no (mfm: IBM/AtariST = 1; gcr_c64 ignored)
+ *   bitcell_ns : bit-cell time; 0 = decoder default. mfm HD ~1000.
  *
  * Pipeline: SCP file -> uft_scp_parser (flux intervals, ns) ->
  * flux_raw_data_t (cumulative ticks @ 1 GHz, so 1 tick = 1 ns) ->
- * flux_decode_mfm() -> decoded sectors -> flat sector image written in
- * the standard CHS layout gw also uses:
- *   offset = ((cyl*heads + head)*spt + (sec - first_sec)) * secsize
+ * flux_decode_mfm()/flux_decode_gcr_c64() -> decoded sectors -> flat
+ * sector image in the layout gw also uses.
  *
- * SCOPE (honest): only the uniform-geometry IBM-style MFM family
- * (IBM-DD, IBM-HD, AtariST-DD) is wired. C64-GCR (zone geometry —
- * non-uniform spt), Apple2-GCR and Amiga-MFM each need their own
- * image-assembly path; flux_decode_gcr_c64/_apple exist in the engine
- * but the layout reconstruction is follow-up work. For any non-"mfm"
- * encoding this helper exits 3 (ENC_NOT_WIRED) so the differential
- * records an honest per-format gap rather than a false divergence.
+ *   mfm:     offset = ((cyl*heads + head)*spt + (sec-first_sec)) * secsize
+ *   gcr_c64: offset = d64_track_offset(cyl) + sec*256   (40-track .d64)
+ *
+ * SCOPE (honest): the uniform-geometry IBM-style MFM family and
+ * Commodore 1541 GCR are wired. Apple2-GCR and Amiga-MFM each still
+ * need their own helper-side image assembly (flux_decode_gcr_apple
+ * exists; FLUX_ENC_AMIGA currently routes to the IBM-MFM decoder which
+ * cannot parse Amiga track structure). For those encodings this helper
+ * exits 3 (ENC_NOT_WIRED) so the differential records an honest
+ * per-format gap rather than a false divergence.
  *
  * Exit codes: 0 ok | 1 usage | 2 scp/decode error | 3 encoding not wired
  */
@@ -46,6 +50,75 @@
 #define EXIT_USAGE         1
 #define EXIT_SCP_ERROR     2
 #define EXIT_ENC_NOT_WIRED 3
+
+typedef enum { ENC_MFM, ENC_GCR_C64 } helper_enc_t;
+
+/* ── Commodore 1541 .d64 geometry ────────────────────────────────────
+ * gw's `commodore.1541` diskdef is the 40-track .d64 (768 sectors,
+ * 196608 bytes). Zone sector counts: 21/19/18/17. The engine carries
+ * the same table internally (uft_flux_decoder.c c64_sectors_per_track);
+ * this is the test-fixture copy used only for image placement. */
+static const int d64_spt[40] = {
+    21,21,21,21,21,21,21,21,21,21,21,21,21,21,21,21,21,  /* tracks  1-17 */
+    19,19,19,19,19,19,19,                                /* tracks 18-24 */
+    18,18,18,18,18,18,                                   /* tracks 25-30 */
+    17,17,17,17,17,17,17,17,17,17,                       /* tracks 31-40 */
+};
+#define D64_TRACKS      40
+#define D64_SECSIZE     256
+#define D64_IMAGE_SIZE  196608  /* sum(d64_spt) * 256 */
+
+/* Byte offset of (0-based track) cyl in the .d64 image. */
+static size_t d64_track_offset(int cyl)
+{
+    size_t off = 0;
+    for (int t = 0; t < cyl && t < D64_TRACKS; ++t)
+        off += (size_t)d64_spt[t] * D64_SECSIZE;
+    return off;
+}
+
+/* ── SCP track -> flux_raw_data_t ────────────────────────────────────
+ * SCP flux_data is ns intervals (uft_scp_parser converts cells -> ns,
+ * with 0 entries as overflow placeholders). flux_decode_* wants
+ * cumulative transition TIMES in sample ticks. A 1 GHz sample rate
+ * makes 1 tick == 1 ns; the 0 placeholders are not real transitions
+ * and are skipped. Caller owns *trans_out and must free() it. */
+static int scp_track_to_flux(uft_scp_ctx_t *scp, int t,
+                             flux_raw_data_t *flux, uint32_t **trans_out)
+{
+    *trans_out = NULL;
+    if (!uft_scp_has_track(scp, t)) return 0;
+
+    uft_scp_track_data_t td;
+    memset(&td, 0, sizeof(td));
+    if (uft_scp_read_track(scp, t, &td) != UFT_SCP_OK) return 0;
+    if (td.revolution_count == 0 || td.revolutions[0].flux_count == 0) {
+        uft_scp_free_track(&td);
+        return 0;
+    }
+
+    const uft_scp_rev_data_t *rev = &td.revolutions[0];
+    uint32_t *trans = (uint32_t *)malloc(rev->flux_count * sizeof(uint32_t));
+    if (!trans) { uft_scp_free_track(&td); return 0; }
+
+    size_t   n   = 0;
+    uint64_t cum = 0;
+    for (uint32_t i = 0; i < rev->flux_count; ++i) {
+        uint32_t iv = rev->flux_data ? rev->flux_data[i] : 0u;
+        if (iv == 0) continue;            /* SCP overflow placeholder */
+        cum += iv;
+        trans[n++] = (uint32_t)cum;
+    }
+
+    uft_scp_free_track(&td);
+
+    memset(flux, 0, sizeof(*flux));
+    flux->transitions      = trans;
+    flux->transition_count = n;
+    flux->sample_rate      = 1000000000u;  /* 1 GHz -> 1 tick = 1 ns */
+    *trans_out = trans;
+    return 1;
+}
 
 int main(int argc, char **argv)
 {
@@ -64,16 +137,21 @@ int main(int argc, char **argv)
     const int    first_sec= atoi(argv[7]);
     const uint32_t bitcell_ns = (argc == 9) ? (uint32_t)strtoul(argv[8], NULL, 10) : 0u;
 
-    if (strcmp(encoding, "mfm") != 0) {
-        /* C64-GCR / Apple2-GCR / Amiga-MFM: the engine has decoders
-         * (flux_decode_gcr_c64/_apple) but the image-layout
-         * reconstruction is not wired here yet. Honest gap, not a lie. */
+    helper_enc_t enc;
+    if      (strcmp(encoding, "mfm")     == 0) enc = ENC_MFM;
+    else if (strcmp(encoding, "gcr_c64") == 0) enc = ENC_GCR_C64;
+    else {
+        /* gcr_apple / amiga: image-layout reconstruction not wired here
+         * yet (gcr_apple) or no real engine decoder (amiga routes to the
+         * IBM-MFM decoder). Honest gap, not a lie. */
         fprintf(stderr, "uft_flux_decode: encoding '%s' not wired "
-                "(only 'mfm' so far) — see file header\n", encoding);
+                "(mfm, gcr_c64 so far) — see file header\n", encoding);
         return EXIT_ENC_NOT_WIRED;
     }
-    if (heads < 1 || heads > 2 || spt < 1 || secsize < 1 || first_sec < 0) {
-        fprintf(stderr, "uft_flux_decode: bad geometry args\n");
+
+    if (enc == ENC_MFM &&
+        (heads < 1 || heads > 2 || spt < 1 || secsize < 1 || first_sec < 0)) {
+        fprintf(stderr, "uft_flux_decode: bad mfm geometry args\n");
         return EXIT_USAGE;
     }
 
@@ -88,10 +166,11 @@ int main(int argc, char **argv)
         return EXIT_SCP_ERROR;
     }
 
-    /* Output image: a track of `spt` sectors, both heads, as many
-     * cylinders as the SCP holds. Sized generously, trimmed on write. */
-    size_t max_cyl    = UFT_SCP_MAX_TRACKS;  /* SCP track index upper bound */
-    size_t image_size = max_cyl * (size_t)heads * (size_t)spt * (size_t)secsize;
+    /* Output image. mfm: sized generously, trimmed on write to the real
+     * extent. gcr_c64: fixed 40-track .d64. */
+    size_t image_size = (enc == ENC_GCR_C64)
+        ? (size_t)D64_IMAGE_SIZE
+        : (size_t)UFT_SCP_MAX_TRACKS * (size_t)heads * (size_t)spt * (size_t)secsize;
     uint8_t *image = (uint8_t *)calloc(image_size, 1);
     if (!image) {
         fprintf(stderr, "uft_flux_decode: out of memory\n");
@@ -100,73 +179,61 @@ int main(int argc, char **argv)
     }
 
     int    placed_sectors = 0;
-    size_t highest_offset = 0;   /* track the real extent for trimming */
+    size_t highest_offset = (enc == ENC_GCR_C64) ? (size_t)D64_IMAGE_SIZE : 0;
 
     for (int t = 0; t < UFT_SCP_MAX_TRACKS; ++t) {
-        if (!uft_scp_has_track(scp, t)) continue;
-
-        uft_scp_track_data_t td;
-        memset(&td, 0, sizeof(td));
-        if (uft_scp_read_track(scp, t, &td) != UFT_SCP_OK) continue;
-        if (td.revolution_count == 0 || td.revolutions[0].flux_count == 0) {
-            uft_scp_free_track(&td);
-            continue;
-        }
-
-        /* SCP flux_data is ns intervals (uft_scp_parser converts cells
-         * -> ns, with 0 entries as overflow placeholders). flux_decode_*
-         * wants cumulative transition TIMES in sample ticks. Use a
-         * 1 GHz sample rate so 1 tick == 1 ns, and skip the 0
-         * placeholders (they are not real transitions). */
-        const uft_scp_rev_data_t *rev = &td.revolutions[0];
-        uint32_t *trans = (uint32_t *)malloc(rev->flux_count * sizeof(uint32_t));
-        if (!trans) { uft_scp_free_track(&td); continue; }
-        size_t   n = 0;
-        uint64_t cum = 0;
-        for (uint32_t i = 0; i < rev->flux_count; ++i) {
-            uint32_t iv = rev->flux_data ? rev->flux_data[i] : 0u;
-            if (iv == 0) continue;          /* SCP overflow placeholder */
-            cum += iv;
-            trans[n++] = (uint32_t)cum;
-        }
-
         flux_raw_data_t flux;
-        memset(&flux, 0, sizeof(flux));
-        flux.transitions      = trans;
-        flux.transition_count = n;
-        flux.sample_rate      = 1000000000u;   /* 1 GHz -> 1 tick = 1 ns */
+        uint32_t       *trans = NULL;
+        if (!scp_track_to_flux(scp, t, &flux, &trans)) continue;
 
         flux_decoder_options_t opts;
         flux_decoder_options_init(&opts);
-        opts.encoding   = FLUX_ENC_MFM;
-        opts.bitcell_ns = bitcell_ns;          /* 0 -> decoder DD default */
-        opts.use_pll    = true;
+        opts.use_pll = true;
 
         flux_decoded_track_t dt;
         flux_decoded_track_init(&dt);
-        flux_status_t st = flux_decode_mfm(&flux, &dt, &opts);
+        flux_status_t st;
+
+        if (enc == ENC_MFM) {
+            opts.encoding   = FLUX_ENC_MFM;
+            opts.bitcell_ns = bitcell_ns;       /* 0 -> decoder DD default */
+            st = flux_decode_mfm(&flux, &dt, &opts);
+        } else {
+            opts.encoding   = FLUX_ENC_GCR_C64;
+            opts.bitcell_ns = bitcell_ns;       /* 0 -> decoder C64 default */
+            st = flux_decode_gcr_c64(&flux, &dt, &opts);
+        }
 
         if (st == FLUX_OK) {
             for (size_t s = 0; s < dt.sector_count; ++s) {
                 const flux_decoded_sector_t *sec = &dt.sectors[s];
                 if (!sec->data || sec->data_size == 0) continue;
-                int rel = (int)sec->sector - first_sec;
-                if (sec->head >= heads || rel < 0 || rel >= spt) continue;
-                size_t off = (((size_t)sec->cylinder * heads + sec->head)
-                              * spt + (size_t)rel) * (size_t)secsize;
-                size_t len = sec->data_size < (size_t)secsize
-                                 ? sec->data_size : (size_t)secsize;
-                if (off + (size_t)secsize > image_size) continue;
+
+                size_t off, slot;
+                if (enc == ENC_MFM) {
+                    int rel = (int)sec->sector - first_sec;
+                    if (sec->head >= heads || rel < 0 || rel >= spt) continue;
+                    off  = (((size_t)sec->cylinder * heads + sec->head)
+                            * spt + (size_t)rel) * (size_t)secsize;
+                    slot = (size_t)secsize;
+                } else { /* ENC_GCR_C64 */
+                    if (sec->cylinder >= D64_TRACKS) continue;
+                    if (sec->sector >= d64_spt[sec->cylinder]) continue;
+                    off  = d64_track_offset((int)sec->cylinder)
+                           + (size_t)sec->sector * D64_SECSIZE;
+                    slot = D64_SECSIZE;
+                }
+
+                if (off + slot > image_size) continue;
+                size_t len = sec->data_size < slot ? sec->data_size : slot;
                 memcpy(image + off, sec->data, len);
-                if (off + (size_t)secsize > highest_offset)
-                    highest_offset = off + (size_t)secsize;
+                if (off + slot > highest_offset) highest_offset = off + slot;
                 placed_sectors++;
             }
         }
 
         flux_decoded_track_free(&dt);
         free(trans);
-        uft_scp_free_track(&td);
     }
 
     uft_scp_destroy(scp);
