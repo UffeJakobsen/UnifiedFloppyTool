@@ -16,7 +16,7 @@ integration, D4 OS-detection, D5 forensic integrity).
 
 | Provider | Verdict | D1 | D2 | D3 | D4 | D5 | LOC | Integration |
 |----------|---------|----|----|----|----|----|-----|-------------|
-| Greaseweazle | **PARTIAL** | PASS | PARTIAL | PASS | PARTIAL | PASS◆ | 906 | native (C-API) |
+| Greaseweazle | **PARTIAL** | PASS | PARTIAL | PASS | PASS | PASS◆ | 906 | native (C-API) |
 | SCP | **PARTIAL** | UNVERIFIED | PARTIAL | FAIL | PARTIAL | PASS◆ | ~ | native (libusb, M3.1 scaffold) |
 | KryoFlux | **PARTIAL** | UNVERIFIED | **FAIL** | FAIL | PARTIAL | PASS◆ | ~ | CLI wrapper (DTC) |
 | FluxEngine | **PARTIAL** | PASS | **FAIL** | FAIL | PARTIAL | PASS◆ | ~ | CLI wrapper (fluxengine) |
@@ -179,13 +179,16 @@ SDK, and may not match the real opcode space. Upgrading the references
 from `recalled` → `vendored` is required before any D1 diff can be a
 real conformance gate.
 
-### ARCH-9 — P3: macOS gaps
+### ARCH-9 — P3: macOS gap (XUM1541)
 
-- Greaseweazle C-HAL port enumeration omits `/dev/cu.usbmodem*` /
-  `/dev/tty.usbmodem*` (`uft_greaseweazle_full.c:479`) — GW found on
-  macOS only via the Qt `QSerialPortInfo` path.
 - XUM1541 `OpenCbmLibrary::load()` (`xum1541_usb.h:365-368`) has no
   `.dylib` path — XUM1541 is dead on macOS.
+
+> The pilot's **GW-D4-1** ("GW C-HAL omits macOS device patterns") was a
+> **false positive — retracted.** A full read of `uft_gw_list_ports()`
+> shows a `readdir("/dev")` scan (`uft_greaseweazle_full.c:494–506`) that
+> matches `cu.usbmodem*` correctly. Greaseweazle macOS detection is
+> complete — see `audit/greaseweazle/REPORT.md` D4.
 
 ---
 
@@ -228,8 +231,6 @@ real conformance gate.
 - **ARCH-6** — update XUM1541/Applesauce C-HAL error strings to stop
   pointing at deleted V1 files; either delete the dead V1
   `include/uft/hardwareprovider.h` or document why it survives.
-- **GW-D4-1** — add macOS device-name patterns to the GW C-HAL port
-  enumeration (protected path — needs sign-off).
 - **SCP-D1-1** — verify the SCP USB command bytes against the vendor
   SCP SDK before the M3.1 libusb wiring lands; they currently cite
   `a8rawconv`, not the vendor reference.
@@ -240,7 +241,7 @@ real conformance gate.
   `cmd.h`, SCP SDK, OpenCBM, fluxengine/DTC CLI grammars) and upgrade
   every D1 reference from `recalled` to `vendored`. Then the per-provider
   `diff.py` becomes a CI conformance gate.
-- **ARCH-9** — XUM1541 `.dylib` load path; GW macOS port patterns.
+- **ARCH-9** — XUM1541 `.dylib` load path (macOS).
 - **GW-D1-1** — confirm whether `CMD_READ_MEM/WRITE_MEM/GET_INFO_EXT`
   (0x20-0x22) are a real GW protocol extension or a UFT invention.
 - Per-provider P3 items — see each `REPORT.md`.

@@ -145,17 +145,19 @@ not a Greaseweazle defect.
 |----|-----------|----------|--------|
 | **Windows** | Qt `QSerialPortInfo::availablePorts()` when `UFT_HAS_SERIALPORT`; else `HKLM\HARDWARE\DEVICEMAP\SERIALCOMM` registry enum. C HAL: `CreateFile` + `DCB` + `COMMTIMEOUTS` (`uft_greaseweazle_full.c:155–263`), port pattern `COM%d` (`:473`). VID/PID hint `0x1209/0x4D69` (`hardwaretab.cpp:447`). | code path complete both Qt-side and C-HAL-side | **PASS** |
 | **Linux** | Qt `QSerialPortInfo`; C HAL `open(port, O_RDWR\|O_NOCTTY\|O_NONBLOCK)` (`:276`), enum patterns `/dev/ttyACM`, `/dev/ttyUSB` (`:479`), `/dev/greaseweazle` udev symlink with `realpath()` de-dup (`:486–492`), plus a `readdir()` scan of `/dev` (`:499`). | code path complete; udev symlink honoured | **PASS** |
-| **macOS** | Qt `QSerialPortInfo::availablePorts()` works on macOS. **But** the C HAL standalone enumeration pattern list is only `{"/dev/ttyACM","/dev/ttyUSB"}` (`:479`) — macOS devices enumerate as `/dev/cu.usbmodem*` / `/dev/tty.usbmodem*`, which that list does **not** match. | Qt-side: works. C-HAL-side: pattern list omits macOS names. | **PARTIAL** |
+| **macOS** | Qt `QSerialPortInfo::availablePorts()`; C HAL `readdir("/dev")` scan matching `cu.usbmodem*` (`uft_greaseweazle_full.c:494–506`). `cu.*` (call-up) is the correct device class for this access — `tty.*` (dial-in) is deliberately not matched. | code path complete both Qt-side and C-HAL-side | **PASS** |
 
-**Finding GW-D4-1** (medium): the C HAL's pattern-based port enumeration
-(`uft_greaseweazle_full.c:479`) has no macOS device-name pattern. On
-macOS, GW detection works only through the Qt `QSerialPortInfo` path; any
-code path that relies on the C HAL enumerating ports itself (CLI, tests)
-will not find a Greaseweazle on macOS. Cross-check: a real GW on macOS
-appears as `/dev/cu.usbmodem*`.
+**Finding GW-D4-1 — RETRACTED (false positive).** The pilot's first pass
+read only the `pats[]` array (`uft_greaseweazle_full.c:479`) and
+concluded the C HAL had no macOS device-name pattern. A full read of
+`uft_gw_list_ports()` shows a `readdir("/dev")` scan (`:494–506`) that
+explicitly matches `cu.usbmodem*`. macOS enumeration is present and
+correct — `cu.*` is the right device class to open; `tty.*` is
+intentionally excluded. No defect. This retraction is itself a forensic
+record: "Kein Bit verloren" applies to the audit too.
 
-**Status: PARTIAL** — Win/Linux PASS, macOS PARTIAL (Qt path works, C HAL
-enum gap).
+**Status: PASS** — Windows, Linux and macOS all have a complete C-HAL +
+Qt enumeration path.
 
 ---
 
@@ -197,9 +199,6 @@ GW-D5-1 and GW-D5-4 are medium and worth fixing.
   cannot persist data. *(blocks: P1.20/P1.21 in REFACTOR_TASKS.md)*
 
 **P2:**
-- **GW-D4-1** — add macOS device-name patterns (`/dev/cu.usbmodem*`,
-  `/dev/tty.usbmodem*`) to the C HAL port enumeration list
-  (`uft_greaseweazle_full.c:479`). Protected path — needs sign-off.
 - **GW-D5-4** — when the sample-frequency fallback hits the static
   `#define`, emit a loud warning into the audit trail rather than
   silently scaling at 72 MHz.
