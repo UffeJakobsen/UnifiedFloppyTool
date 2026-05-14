@@ -60,7 +60,7 @@ P0 headers must not be edited during P1.
 
 | ID    | Task                                                                       | Status |
 |-------|----------------------------------------------------------------------------|--------|
-| P2.1  | `VERSION.txt` → `4.1.4-rc1` + RELEASE_NOTES + CHANGELOG                    | ⬜     |
+| P2.1  | `VERSION.txt` → `4.1.4` + RELEASE_NOTES + CHANGELOG + flatpak metainfo    | ✅ MF-173 |
 | P2.2  | KNOWN_ISSUES cleanup: H-1 / H-2 / H-9 entries removed                      | ⬜     |
 | P2.3  | Tag `v4.1.4-rc1`; 14-day pre-release window                                | ⬜     |
 | P2.4  | After 14 days clean: squash-merge to `main`, tag `v4.1.4`, delete branch   | ⬜     |

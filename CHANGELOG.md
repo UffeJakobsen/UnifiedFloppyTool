@@ -1,8 +1,119 @@
 # Changelog
 
-## [Unreleased] (planned 4.1.4 hot-fix)
+## [4.1.4-rc1] - 2026-05 (pre-release)
 
-### Fixed
+### Internal Refactor — Type-Driven HAL (MF-150 … MF-172)
+
+This release replaces UFT's dual-architecture hardware abstraction
+(C HAL fast-path + Qt provider class hierarchy in parallel) with a
+single type-driven HAL. The change is mechanical inside the codebase
+but invisible to the working Greaseweazle workflow.
+
+**Architecture (additions):**
+- Foundation headers `include/uft/hal/{outcomes,concepts,mixins}.h`
+  introducing `std::variant` sum-type outcomes (SectorOutcome,
+  FluxOutcome, MotorOutcome, …), C++20 capability concepts
+  (ReadsRawFlux, ControlsMotor, …), and CRTP mixin templates
+  (`ReadsRawFluxVia<Backend>` …) for provider composition (MF-150).
+- 10 mixin-composed V2 providers (one per controller + a synthetic
+  MockProviderV2): GreaseweazleProviderV2, SCPProviderV2,
+  KryoFluxProviderV2, FluxEngineProviderV2, FC5025ProviderV2,
+  XUM1541ProviderV2, ApplesauceProviderV2, ADFCopyProviderV2,
+  USBFloppyProviderV2 (MF-154, MF-161–MF-168).
+- GUI action wiring is now code-generated from
+  `forms/tab_hardware.actions.yaml` via `tools/wiring_codegen.py`
+  into `generated/tab_hardware_wiring.gen.cpp`. The runtime template
+  `wire_action<cap::X>` (in `include/uft/gui/wiring_runtime.h`)
+  enables/disables the button based on compile-time capability
+  membership and dispatches outcomes through `std::visit` (MF-152,
+  MF-155, MF-156, MF-157).
+- Conformance test harness `tests/test_hal_conformance.cpp` runs 65
+  forensic-invariant sections across all 10 V2 providers — every
+  per-variant invariant (rule F-3 divergent-reads preservation, rule
+  F-4 3-part-error contract, etc.) is now compile-time-checked +
+  runtime-validated (MF-158).
+- Three transport mocks in `tests/mock_hardware/` (usb_loopback,
+  subprocess, serial) provide deterministic byte-stream fixtures
+  for the conformance loop without requiring real hardware (MF-159).
+
+**Removals (V1 hierarchy):**
+- The V1 `HardwareProvider` base class, the `HardwareManager`
+  dispatcher, and 11 V1 provider classes (`*hardwareprovider.{h,cpp}`)
+  are gone — 29 files, ~12 700 LOC deleted (MF-169).
+- The `unified_hal_bridge` Qt↔C bridge that converted
+  `uft_track_t` to the V1 `TrackData` DTO is gone with the V1
+  hierarchy.
+- The X1541-family controller-combo entries (XA1541, XAP1541,
+  XM1541, XE1541, X1541) and their parallel-port enumeration
+  helper are removed — they were phantom-features without a
+  matching provider class (MF-170).
+- `uft_gw_*` C-API calls are now ONLY in
+  `GreaseweazleProviderV2::open()/close()/do_*()`. HardwareTab has
+  zero direct `uft_gw_*` references (MF-171).
+
+**User-visible changes:**
+- Greaseweazle workflow (read, write, detect, motor, seek, RPM,
+  recalibrate): structurally hardened, behavior preserved.
+- 8 non-Greaseweazle controllers (SCP, KryoFlux, FluxEngine, FC5025,
+  XUM1541, Applesauce, ADFCopy, USBFloppy) now display a clear
+  "Controller routing pending" message on Connect instead of
+  silently no-op'ing. The V2 wrappers exist and conform; the
+  HardwareTab → V2 routing for non-GW is task P1.23 (queued for
+  v4.1.5).
+- 5 X1541-family combo entries are gone (never had a working
+  backend; selected workflows always errored).
+
+**Known-issue resolutions:**
+- KNOWN_ISSUES H-1 (GUI freezes during hardware imaging) resolved
+  by the V2 worker-thread routing introduced in MF-147.
+- KNOWN_ISSUES H-2 (silent stubs in HardwareProvider derivatives)
+  resolved structurally — every silent stub became a missing
+  mixin, no longer expressible at the type level.
+- KNOWN_ISSUES H-9 (deprecated `TrackData::errorMessage` alias)
+  resolved by removing the V1 DTOs entirely.
+
+**Quality gates that ship with this RC:**
+- 14 test executables green (test_hal_foundation,
+  test_hal_conformance, test_greaseweazle_v2, test_scp_provider_v2,
+  test_kryoflux_provider_v2, test_fluxengine_provider_v2,
+  test_fc5025_provider_v2, test_xum1541_provider_v2,
+  test_applesauce_provider_v2, test_adfcopy_provider_v2,
+  test_usbfloppy_provider_v2, test_mock_provider_v2,
+  test_mock_hardware, test_wiring_runtime).
+- 65 conformance sections / 0 failed.
+- `scripts/check_consistency.py` 0/0/0/0.
+- `scripts/verify_build_sources.py` no new divergence.
+- `tools/wiring_codegen_tests/run_tests.py` 6/6 (incl. drift gate
+  comparing committed `generated/tab_hardware_wiring.gen.cpp`
+  against a fresh regeneration).
+- C++20 mandatory (was C++17).
+
+**Carry-overs for v4.1.5+ (documented in REFACTOR_TASKS.md):**
+- P1.20 — Migrate FluxCaptureJob to V2 outcome surface.
+- P1.21 — Migrate FluxWriteJob to V2 outcome surface.
+- P1.22 — Remove the `GreaseweazleProviderV2::raw_handle()` /
+  `HardwareTab::gwDevice()` legacy escape hatch.
+- P1.23 — Route the 8 non-Greaseweazle controllers through their
+  V2 providers (variant-dispatch in HardwareTab).
+- P3.1–P3.4 — Tester strategy (differential conformance against
+  Greaseweazle v1.23, improvement test suite, HIL infrastructure).
+
+**Forensic-mission status:**
+- Rule F-3 (preserve divergent reads, never collapse) — enforced
+  at every Sum-Type Marginal/VerifyFailed alternative.
+- Rule F-4 (3-part error messages) — type-enforced via
+  `ProviderError`'s throwing constructor.
+- Rule H-1 (no enabled action without backing capability) —
+  structural via codegen's Phase 2 disable path.
+- Rule H-3 (action without provider) — structural via codegen
+  validation against `KNOWN_CAPABILITIES`.
+- Rule D-2 (SpecStatus per provider) — type-mandated.
+
+### Hot-Fixes Included (predate the refactor — MF-129, MF-141, MF-145, MF-146)
+
+These fixes were tracked as the "planned 4.1.4 hot-fix" before the
+Type-Driven HAL refactor was decided; they ship in the same RC.
+
 - **Windows COM-port-prefix bug across four QSerialPort-based hardware
   providers** (MF-145 / FB user-report). Greaseweazle, SuperCard Pro,
   Applesauce, and ADF-Copy each pre-applied the Win32 device-namespace
@@ -14,48 +125,45 @@
   the production code path (UI → C-HAL `uft_gw_open()` uses
   `CreateFileA` directly, where the prefix is correct), but it did
   affect SCP / Applesauce / ADF-Copy which route through the Qt
-  provider. **All four providers fixed in one patch — affected users
-  of any of these four controllers should test v4.1.4.**
-  USB-Floppy provider's `\\.\A:` and `\\.\B:` paths are intentionally
-  retained: that provider uses `DeviceIoControl` SCSI pass-through
-  where the prefix is the correct Win32 convention for direct
-  volume access.
+  provider. The bug-fix code is now inherent in the V2 providers
+  introduced by the refactor — the V1 sites that had it were deleted
+  along with the V1 hierarchy (MF-169). USB-Floppy provider's
+  `\\.\A:` and `\\.\B:` paths are intentionally retained: that
+  provider uses `DeviceIoControl` SCSI pass-through where the prefix
+  is the correct Win32 convention for direct volume access.
 - **Applesauce ↔ ADF-Copy VID/PID disambiguation** (MF-146). Both
   controllers ship with the generic PJRC Teensy USB ID
   (VID `0x16C0` / PID `0x0483`). Previously, both providers' detect
   paths candidate-matched any 0x16C0:0x0483 device, then attempted
   their own protocol handshake — racing for the same port during
-  auto-detect. Each provider now skips ports whose USB
-  manufacturer / description string identifies the *other*
-  controller (`Evolution Interactive` / `Applesauce` for ADF-Copy
-  scan; `ADF-Copy` / `ADF-Drive` for Applesauce scan). Eliminates
-  the double-claim on systems where only one device is attached.
+  auto-detect. The new ApplesauceProviderV2 + ADFCopyProviderV2
+  detect-runners skip ports whose USB manufacturer / description
+  string identifies the *other* controller. Eliminates the
+  double-claim on systems where only one device is attached.
 - **Greaseweazle bootloader-mode detection** (MF-129). `uft_gw_open()`
-  now refuses bootloader-firmware boards with an actionable error
-  (`UFT_GW_ERR_BOOTLOADER`), surfaced in the UI as recovery hints
-  instead of a generic "I/O error".
+  refuses bootloader-firmware boards with an actionable error
+  (`UFT_GW_ERR_BOOTLOADER`), surfaced via `ProviderError.fix` as
+  recovery hints instead of a generic "I/O error".
 - **MFM IDAM/DAM standalone sector parser** (MF-141 / AUD-002).
-  SCP→ADF/IMG/D64 conversion path now decodes sectors via a
-  reusable API with explicit CRC validation and CHRN-keyed LBA
-  mapping. Previously the inline parser dropped sectors after IDAM,
-  ignored CRCs, and placed payloads in scan order instead of by
-  sector ID.
+  SCP→ADF/IMG/D64 conversion path decodes sectors via a reusable
+  API with explicit CRC validation and CHRN-keyed LBA mapping.
+  Previously the inline parser dropped sectors after IDAM, ignored
+  CRCs, and placed payloads in scan order instead of by sector ID.
 
-### Internal
-- Restored 10 hardware Qt-provider classes that had been deleted in
-  MF-132 (FluxEngine, KryoFlux, SCP, Applesauce, FC5025, XUM1541,
-  Greaseweazle, ADF-Copy, USB-Floppy, Mock — 10 341 LOC of real
-  subprocess / serial / libusb implementations). They now route
-  through HardwareManager from `hardwaretab.cpp` (MF-143).
+### Build / Tooling
+
 - `uft_version.h` is regenerated from `VERSION.txt` at every qmake
   parse / CMake configure (MF-131). Removes the `DEFINES+=
   UFT_VERSION_STRING=\\\"...\\\"` quoting fragility from
-  `release.yml` (MF-145, eliminates the suspected v4.1.0-shows-on-
-  v4.1.3 cause).
-- `scripts/check_consistency.py --check version` extended to also
-  scan `RELEASE_NOTES.md` headline + Doxygen `@version` tags
+  `release.yml` (MF-145).
+- `scripts/check_consistency.py --check version` scans
+  `RELEASE_NOTES.md` headline + Doxygen `@version` tags too
   (MF-128). Pre-push gate now blocks 5 distinct version-drift
   classes.
+- `tools/wiring_codegen_tests/run_tests.py` is a new CI smoke
+  with 6 cases: happy-path / H-3 surface (missing widget) / H-4
+  surface (unknown capability) / idempotence / production-YAML
+  validation / committed-`.gen.cpp`-is-fresh drift detector.
 
 ## [4.1.3] - 2026-04-16
 
