@@ -12,8 +12,8 @@ Byte-exact differential of the **UFT flux decode engine** against
   `gw convert` and the UFT engine; the two decoded sector images are
   compared byte-for-byte.
 
-Last run: gw 1.23, UFT @ MF-224, MinGW gcc 13.1.0 — `pytest
-tests/differential/` → **5 passed, 1 skipped, exit 0**.
+Last run: gw 1.23, UFT @ MF-225, MinGW gcc 13.1.0 — `pytest
+tests/differential/` → **6 passed, 0 skipped, exit 0**.
 
 ## Per-format result
 
@@ -24,12 +24,13 @@ tests/differential/` → **5 passed, 1 skipped, exit 0**.
 | `atarist_dd` | Atari ST DD 720K   | `atarist.720`         | mfm       | ✅ **GLEICH** — byte-exact (737280 B, 1440 sectors) |
 | `c64_gcr`    | Commodore 1541 GCR | `commodore.1541`      | gcr_c64   | ✅ **GLEICH** — byte-exact (196608 B, 768 sectors, 40-track .d64) |
 | `apple2_525` | Apple II 5.25" GCR | `apple2.appledos.140` | gcr_apple | ✅ **GLEICH** — byte-exact (143360 B, 560 sectors, 35-track .do) |
-| `amiga_dd`   | Amiga DD 880K      | `amiga.amigados`      | amiga     | ⬜ **UFT-side pending** — see below |
+| `amiga_dd`   | Amiga DD 880K      | `amiga.amigados`      | amiga     | ✅ **GLEICH** — byte-exact (901120 B, 1760 sectors, 80-cyl .adf) |
 
-No **DIVERGENT** rows in this run. If a format ever diverges,
-`test_gw_parity.py` fails that parametrised case and prints the first
-differing offset with 32-byte hex context for both sides — that hex
-context is the per-format diff-hex this report would carry.
+All six corpus disk classes reach byte-exact parity — no **DIVERGENT**
+rows, and no skipped rows. If a format ever diverges, `test_gw_parity.py`
+fails that parametrised case and prints the first differing offset with
+32-byte hex context for both sides — that hex context is the per-format
+diff-hex this report would carry.
 
 ## The 3 IBM-style MFM formats — real parity
 
@@ -77,14 +78,22 @@ corpus disk is distinct (768/768, 560/560, 5760/5760, …). All five
 wired formats were re-verified against this stronger corpus, so the
 ✅ rows now mean *placement* parity, not just count parity.
 
-## The 1 remaining format — no Amiga decoder yet
+## Amiga-MFM — real parity, after writing the decoder (MF-225)
 
-`amiga_dd` is **skipped**, not divergent — an honest "not tested yet".
-UFT has **no** Amiga-track flux decoder: `FLUX_ENC_AMIGA` is an enum
-value that routes to `flux_decode_mfm`, which finds no IBM IDAM/DAM in
-Amiga's whole-track MFM (11×512 sectors, 0x4489 sync, odd/even bit
-split — a fundamentally different layout). A dedicated Amiga decoder is
-needed before a differential is possible (#109c).
+`amiga_dd` was the last gap: UFT had **no** Amiga-track flux decoder —
+`FLUX_ENC_AMIGA` silently routed to `flux_decode_mfm`, which finds no
+IBM IDAM/DAM in Amiga's whole-track MFM and decoded zero sectors.
+`flux_decode_amiga()` was written from the AmigaDOS trackdisk format: 11
+sectors/track, each `2× 0x4489` sync + an odd/even-split info long +
+16-byte sector label + header/data checksums + a 512-byte odd/even-split
+data block. The odd/even merge consumes the **raw** MFM cells directly
+(`((odd & 0x55)<<1) | (even & 0x55)`) — there is no IBM-style
+clock-strip step. `flux_decode_track` now routes `FLUX_ENC_AMIGA` to it,
+ending the silent misroute.
+
+`uft == gw == source` — all 901120 bytes, 1760 sectors, identical. gw
+independently reports `1760 of 1760 (100%)`, confirming every Amiga
+header + data checksum.
 
 ## Reproduce
 

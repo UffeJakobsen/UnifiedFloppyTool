@@ -11,32 +11,32 @@
  *   usage: uft_flux_decode <in.scp> <encoding> <out.img>
  *                          <heads> <spt> <secsize> <first_sec> [bitcell_ns]
  *
- *   encoding   : mfm      uniform-geometry IBM-style MFM (IBM-DD/HD, AtariST)
- *                gcr_c64  Commodore 1541 GCR (zone geometry, 40-track .d64)
- *                (gcr_apple / amiga exit 3 — see SCOPE below)
- *   heads      : 1 or 2          (mfm only; ignored for gcr_c64)
- *   spt        : sectors/track   (mfm only; gcr_c64 is zone geometry)
- *   secsize    : bytes/sector    (mfm only; gcr_c64 fixed 256)
- *   first_sec  : first sector no (mfm: IBM/AtariST = 1; gcr_c64 ignored)
+ *   encoding   : mfm        uniform-geometry IBM-style MFM (IBM-DD/HD, AtariST)
+ *                gcr_c64    Commodore 1541 GCR (zone geometry, 40-track .d64)
+ *                gcr_apple  Apple II 5.25" GCR (35-track .do, DOS 3.3 skew)
+ *                amiga      AmigaDOS trackdisk MFM (80-cyl 2-head 11-sec .adf)
+ *   heads      : 1 or 2          (mfm only; fixed-geometry encodings ignore it)
+ *   spt        : sectors/track   (mfm only)
+ *   secsize    : bytes/sector    (mfm only)
+ *   first_sec  : first sector no (mfm: IBM/AtariST = 1)
  *   bitcell_ns : bit-cell time; 0 = decoder default. mfm HD ~1000.
  *
  * Pipeline: SCP file -> uft_scp_parser (flux intervals, ns) ->
  * flux_raw_data_t (cumulative ticks @ 1 GHz, so 1 tick = 1 ns) ->
- * flux_decode_mfm()/flux_decode_gcr_c64() -> decoded sectors -> flat
- * sector image in the layout gw also uses.
+ * flux_decode_{mfm,gcr_c64,gcr_apple,amiga}() -> decoded sectors ->
+ * flat sector image in the layout gw also uses.
  *
- *   mfm:     offset = ((cyl*heads + head)*spt + (sec-first_sec)) * secsize
- *   gcr_c64: offset = d64_track_offset(cyl) + sec*256   (40-track .d64)
+ *   mfm:       offset = ((cyl*heads + head)*spt + (sec-first_sec)) * secsize
+ *   gcr_c64:   offset = d64_track_offset(cyl) + sec*256   (40-track .d64)
+ *   gcr_apple: offset = (cyl*16 + dos33_skew[sec]) * 256  (35-track .do)
+ *   amiga:     offset = ((cyl*2 + head)*11 + sec) * 512   (80-cyl .adf)
  *
- * SCOPE (honest): the uniform-geometry IBM-style MFM family and
- * Commodore 1541 GCR are wired. Apple2-GCR and Amiga-MFM each still
- * need their own helper-side image assembly (flux_decode_gcr_apple
- * exists; FLUX_ENC_AMIGA currently routes to the IBM-MFM decoder which
- * cannot parse Amiga track structure). For those encodings this helper
- * exits 3 (ENC_NOT_WIRED) so the differential records an honest
- * per-format gap rather than a false divergence.
+ * SCOPE: all four flux-encoding families the differential corpus
+ * exercises are wired and reach byte-exact parity with gw 1.23. The
+ * uniform-geometry MFM family is geometry-parameterised (heads/spt/...);
+ * the three fixed-geometry encodings hardcode their disk class.
  *
- * Exit codes: 0 ok | 1 usage | 2 scp/decode error | 3 encoding not wired
+ * Exit codes: 0 ok | 1 usage | 2 scp/decode error
  */
 #include "uft/flux/uft_scp_parser.h"
 #include "uft/flux/uft_flux_decoder.h"
@@ -49,9 +49,8 @@
 #define EXIT_OK            0
 #define EXIT_USAGE         1
 #define EXIT_SCP_ERROR     2
-#define EXIT_ENC_NOT_WIRED 3
 
-typedef enum { ENC_MFM, ENC_GCR_C64, ENC_GCR_APPLE } helper_enc_t;
+typedef enum { ENC_MFM, ENC_GCR_C64, ENC_GCR_APPLE, ENC_AMIGA } helper_enc_t;
 
 /* ── Commodore 1541 .d64 geometry ────────────────────────────────────
  * gw's `commodore.1541` diskdef is the 40-track .d64 (768 sectors,
@@ -93,6 +92,16 @@ static const int apple_dos33_phys_to_log[16] = {
 #define APPLE_SPT         16
 #define APPLE_SECSIZE     256
 #define APPLE_IMAGE_SIZE  143360  /* 35 * 16 * 256 */
+
+/* ── Amiga AmigaDOS DD 880K geometry ─────────────────────────────────
+ * gw's `amiga.amigados` is the 80-cyl, 2-head, 11-sector, 512-byte
+ * .adf (901120 B). flux_decode_amiga() returns the AmigaDOS track
+ * number in cylinder/head already; .adf order is (cyl, head, sector). */
+#define AMIGA_CYLS        80
+#define AMIGA_HEADS       2
+#define AMIGA_SPT         11
+#define AMIGA_SECSIZE     512
+#define AMIGA_IMAGE_SIZE  901120  /* 80 * 2 * 11 * 512 */
 
 /* ── SCP track -> flux_raw_data_t ────────────────────────────────────
  * SCP flux_data is ns intervals (uft_scp_parser converts cells -> ns,
@@ -158,14 +167,12 @@ int main(int argc, char **argv)
     if      (strcmp(encoding, "mfm")       == 0) enc = ENC_MFM;
     else if (strcmp(encoding, "gcr_c64")   == 0) enc = ENC_GCR_C64;
     else if (strcmp(encoding, "gcr_apple") == 0) enc = ENC_GCR_APPLE;
+    else if (strcmp(encoding, "amiga")     == 0) enc = ENC_AMIGA;
     else {
-        /* amiga: no real engine decoder (FLUX_ENC_AMIGA routes to the
-         * IBM-MFM decoder, which cannot parse Amiga track structure).
-         * Honest gap, not a lie. */
-        fprintf(stderr, "uft_flux_decode: encoding '%s' not wired "
-                "(mfm, gcr_c64, gcr_apple so far) — see file header\n",
+        fprintf(stderr, "uft_flux_decode: unknown encoding '%s' "
+                "(mfm, gcr_c64, gcr_apple, amiga) — see file header\n",
                 encoding);
-        return EXIT_ENC_NOT_WIRED;
+        return EXIT_USAGE;
     }
 
     if (enc == ENC_MFM &&
@@ -191,6 +198,7 @@ int main(int argc, char **argv)
     switch (enc) {
     case ENC_GCR_C64:   image_size = (size_t)D64_IMAGE_SIZE;   break;
     case ENC_GCR_APPLE: image_size = (size_t)APPLE_IMAGE_SIZE; break;
+    case ENC_AMIGA:     image_size = (size_t)AMIGA_IMAGE_SIZE; break;
     default:            image_size = (size_t)UFT_SCP_MAX_TRACKS
                             * (size_t)heads * (size_t)spt * (size_t)secsize;
     }
@@ -207,6 +215,7 @@ int main(int argc, char **argv)
      * the differential then shows exactly which track diverged). */
     size_t highest_offset = (enc == ENC_GCR_C64)   ? (size_t)D64_IMAGE_SIZE
                           : (enc == ENC_GCR_APPLE) ? (size_t)APPLE_IMAGE_SIZE
+                          : (enc == ENC_AMIGA)     ? (size_t)AMIGA_IMAGE_SIZE
                           : 0;
 
     for (int t = 0; t < UFT_SCP_MAX_TRACKS; ++t) {
@@ -232,9 +241,13 @@ int main(int argc, char **argv)
             opts.encoding = FLUX_ENC_GCR_C64;
             st = flux_decode_gcr_c64(&flux, &dt, &opts);
             break;
-        default: /* ENC_GCR_APPLE */
+        case ENC_GCR_APPLE:
             opts.encoding = FLUX_ENC_GCR_APPLE;
             st = flux_decode_gcr_apple(&flux, &dt, &opts);
+            break;
+        default: /* ENC_AMIGA */
+            opts.encoding = FLUX_ENC_AMIGA;
+            st = flux_decode_amiga(&flux, &dt, &opts);
             break;
         }
 
@@ -256,13 +269,21 @@ int main(int argc, char **argv)
                     off  = d64_track_offset((int)sec->cylinder)
                            + (size_t)sec->sector * D64_SECSIZE;
                     slot = D64_SECSIZE;
-                } else { /* ENC_GCR_APPLE */
+                } else if (enc == ENC_GCR_APPLE) {
                     if (sec->cylinder >= APPLE_TRACKS) continue;
                     if (sec->sector >= APPLE_SPT) continue;
                     int log = apple_dos33_phys_to_log[sec->sector];
                     off  = ((size_t)sec->cylinder * APPLE_SPT + (size_t)log)
                            * APPLE_SECSIZE;
                     slot = APPLE_SECSIZE;
+                } else { /* ENC_AMIGA — .adf order is (cyl, head, sector) */
+                    if (sec->cylinder >= AMIGA_CYLS) continue;
+                    if (sec->head >= AMIGA_HEADS) continue;
+                    if (sec->sector >= AMIGA_SPT) continue;
+                    off  = (((size_t)sec->cylinder * AMIGA_HEADS
+                             + sec->head) * AMIGA_SPT + sec->sector)
+                           * AMIGA_SECSIZE;
+                    slot = AMIGA_SECSIZE;
                 }
 
                 if (off + slot > image_size) continue;

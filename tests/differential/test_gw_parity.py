@@ -7,10 +7,10 @@ stream with BOTH Greaseweazle (`gw convert`) and the UFT flux engine
 are BYTE-IDENTICAL.
 
 This is real parity, not theatre: a format passes only when UFT and gw
-produce the exact same bytes from the exact same flux. A format whose
-UFT-side decode path is not wired yet (the helper exits ENC_NOT_WIRED)
-is SKIPPED with a pointer to audit/DIFFERENTIAL_REPORT.md — honestly
-"not tested yet", never "expected to differ".
+produce the exact same bytes from the exact same flux. All six corpus
+disk classes — IBM MFM (DD/HD), Atari ST MFM, Commodore 1541 GCR,
+Apple II GCR and AmigaDOS MFM — are wired end-to-end and reach
+byte-exact parity.
 
 Corpus: tests/differential/corpus/ (see gen_corpus.py). gw + corpus +
 helper are resolved by conftest.py; the suite skips cleanly when gw is
@@ -25,18 +25,12 @@ import pytest
 
 HERE = Path(__file__).resolve().parent
 
-# ENC_NOT_WIRED exit code from uft_flux_decode.c — the UFT-side decode
-# path for this encoding class is not implemented in the helper yet.
-ENC_NOT_WIRED = 3
-
 # name, gw --format, helper encoding, heads, spt, secsize, first_sec, bitcell_ns
 #
-# The three IBM-style MFM formats have uniform geometry and a wired
-# helper path -> real parity. C64-GCR (zone geometry), Apple2-GCR and
-# Amiga-MFM each need their own helper-side image assembly; the engine
-# decoders exist (flux_decode_gcr_c64/_apple) but the layout
-# reconstruction is follow-up work -> the helper returns ENC_NOT_WIRED
-# and the format is recorded as a documented gap, not a divergence.
+# The MFM family is geometry-parameterised (heads/spt/secsize/first_sec/
+# bitcell). The three fixed-geometry encodings — gcr_c64, gcr_apple,
+# amiga — hardcode their disk class in the helper, so their numeric
+# columns are 0 and ignored.
 CORPUS = [
     ("ibm_dd",     "ibm.720",             "mfm",       2,  9, 512, 1, 2000),
     ("ibm_hd",     "ibm.1440",            "mfm",       2, 18, 512, 1, 1000),
@@ -60,9 +54,6 @@ def test_gw_parity(spec, gw_path, uft_decoder, corpus_ready, tmp_path):
     if bitcell:
         args.append(str(bitcell))
     uft = subprocess.run(args, capture_output=True, text=True)
-    if uft.returncode == ENC_NOT_WIRED:
-        pytest.skip(f"{name}: UFT-side '{enc}' decode not wired in the "
-                    f"helper yet — see audit/DIFFERENTIAL_REPORT.md")
     assert uft.returncode == 0, (
         f"{name}: uft_flux_decode exit {uft.returncode}\n{uft.stderr}")
 

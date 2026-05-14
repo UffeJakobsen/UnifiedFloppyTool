@@ -971,6 +971,188 @@ flux_encoding_t flux_detect_encoding(const flux_raw_data_t *flux) {
  * Main Decoder Entry Point
  * ============================================================================ */
 
+/* ============================================================================
+ * Amiga (AmigaDOS trackdisk) MFM Decoder
+ * ============================================================================ */
+
+#define AMIGA_CKSUM_MASK    0x55555555u
+#define AMIGA_SECTOR_BYTES  512
+/* info(4)+label(16)+hdrck(4)+datack(4)+data(512), each odd+even encoded
+ * => 2*(4+16+4+4+512) = 1080 raw MFM bytes after the sync run, and a
+ * raw MFM byte is 8 flux cells (the odd/even scheme has no clock-strip
+ * step) => 8640 raw cells of payload per sector. */
+#define AMIGA_PAYLOAD_CELLS  (1080 * 8)
+
+/* Read 8 raw MFM cells at bit position `pos` as one byte.
+ *
+ * Unlike IBM MFM there is NO separate clock-strip step here: in the
+ * Amiga odd/even scheme the data bits sit directly at the 0x55
+ * positions of the RAW cells, and the odd/even merge consumes the raw
+ * bytes as-is (see amiga_read_field). flux_mfm_decode_byte() must NOT
+ * be applied — that would strip a layer the scheme does not have. */
+static uint8_t amiga_read_raw_byte(const uint8_t *bits, size_t bit_count,
+                                   size_t pos) {
+    uint8_t r = 0;
+    for (int b = 0; b < 8 && pos + (size_t)b < bit_count; b++)
+        r = (uint8_t)((r << 1) |
+            ((bits[(pos + b) / 8] >> (7 - ((pos + b) % 8))) & 1));
+    return r;
+}
+
+/* Read an Amiga odd/even-split field of `nbytes` decoded bytes.
+ *
+ * On disk the field is `nbytes` raw MFM bytes carrying the ODD data
+ * bits, immediately followed by `nbytes` raw MFM bytes carrying the
+ * EVEN data bits. Each output byte = ((odd & 0x55) << 1) | (even & 0x55).
+ * `pos` is advanced past the whole field (2*nbytes raw MFM bytes = 16
+ * raw cells per output byte).
+ *
+ * If `csum` is non-NULL the field's raw MFM bytes are folded into the
+ * running Amiga checksum (XOR of the big-endian raw MFM longs); the
+ * caller masks with 0x55555555 at the end. The checksum FIELDS
+ * themselves pass csum=NULL — a checksum does not checksum itself. */
+static void amiga_read_field(const uint8_t *bits, size_t bit_count,
+                             size_t *pos, size_t nbytes,
+                             uint8_t *out, uint32_t *csum) {
+    for (int half = 0; half < 2; half++) {          /* 0 = odd, 1 = even */
+        uint32_t acc = 0;
+        int      acc_n = 0;
+        for (size_t j = 0; j < nbytes; j++) {
+            uint8_t rb = amiga_read_raw_byte(bits, bit_count, *pos);
+            *pos += 8;
+            if (half == 0) out[j]  = (uint8_t)((rb & 0x55) << 1);
+            else           out[j] |= (uint8_t)(rb & 0x55);
+            if (csum) {
+                acc = (acc << 8) | rb;
+                if (++acc_n == 4) { *csum ^= acc; acc = 0; acc_n = 0; }
+            }
+        }
+        if (csum && acc_n) {                         /* nbytes not a /4 */
+            acc <<= 8 * (4 - acc_n);
+            *csum ^= acc;
+        }
+    }
+}
+
+static flux_status_t decode_amiga_sector(const uint8_t *bits, size_t bit_count,
+                                         size_t sync_pos,
+                                         flux_decoded_sector_t *sector,
+                                         size_t *end_pos) {
+    /* Skip the 0x4489 sync run — Amiga writes two; mfm_skip_sync_run
+     * tolerates one or more and lands on the info field. */
+    size_t pos = mfm_skip_sync_run(bits, bit_count, sync_pos);
+    if (pos + (size_t)AMIGA_PAYLOAD_CELLS > bit_count)
+        return FLUX_ERR_UNDERFLOW;
+
+    uint8_t  info[4], label[16], hchk[4], dchk[4];
+    uint32_t hdr_csum = 0, data_csum = 0;
+
+    amiga_read_field(bits, bit_count, &pos,  4, info,  &hdr_csum);
+    amiga_read_field(bits, bit_count, &pos, 16, label, &hdr_csum);
+    amiga_read_field(bits, bit_count, &pos,  4, hchk,  NULL);
+    amiga_read_field(bits, bit_count, &pos,  4, dchk,  NULL);
+    (void)label;  /* OS-recovery info — preserved on disk, unused here */
+
+    /* info long = [0xFF][track 0-159][sector 0-10][sectors-to-gap]. */
+    if (info[0] != 0xFF) return FLUX_ERR_NO_SYNC;
+    uint8_t track = info[1], sec = info[2];
+    if (track > 159 || sec > 10) return FLUX_ERR_NO_SYNC;
+
+    sector->cylinder    = track / 2;
+    sector->head        = track % 2;
+    sector->sector      = sec;
+    sector->size_code   = 2;                 /* 512 bytes */
+    sector->id_position = (uint32_t)sync_pos;
+
+    uint32_t hchk_stored = ((uint32_t)hchk[0] << 24) | ((uint32_t)hchk[1] << 16)
+                         | ((uint32_t)hchk[2] <<  8) |  (uint32_t)hchk[3];
+    sector->id_crc    = hchk_stored;
+    sector->id_crc_ok = (hchk_stored == (hdr_csum & AMIGA_CKSUM_MASK));
+
+    sector->data = malloc(AMIGA_SECTOR_BYTES);
+    if (!sector->data) return FLUX_ERR_OVERFLOW;
+    sector->data_size     = AMIGA_SECTOR_BYTES;
+    sector->data_position = (uint32_t)pos;
+
+    amiga_read_field(bits, bit_count, &pos, AMIGA_SECTOR_BYTES,
+                     sector->data, &data_csum);
+
+    uint32_t dchk_stored = ((uint32_t)dchk[0] << 24) | ((uint32_t)dchk[1] << 16)
+                         | ((uint32_t)dchk[2] <<  8) |  (uint32_t)dchk[3];
+    sector->data_crc    = dchk_stored;
+    sector->data_crc_ok = (dchk_stored == (data_csum & AMIGA_CKSUM_MASK));
+    sector->deleted     = false;
+
+    if (end_pos) *end_pos = pos;
+    return FLUX_OK;
+}
+
+flux_status_t flux_decode_amiga(const flux_raw_data_t *flux,
+                                flux_decoded_track_t *track,
+                                const flux_decoder_options_t *opts) {
+    if (!flux || !track) return FLUX_ERR_INVALID;
+
+    flux_decoder_options_t default_opts;
+    if (!opts) {
+        flux_decoder_options_init(&default_opts);
+        opts = &default_opts;
+    }
+
+    double bitcell_ns = opts->bitcell_ns;
+    if (bitcell_ns == 0) bitcell_ns = FLUX_MFM_DD_BITCELL_NS;  /* Amiga DD = 2us */
+
+    size_t max_bits = FLUX_MAX_TRACK_SIZE * 8;
+    uint8_t *bits = calloc(max_bits / 8 + 1, 1);
+    if (!bits) return FLUX_ERR_OVERFLOW;
+
+    flux_pll_t pll;
+    flux_pll_init(&pll, bitcell_ns);
+    pll.use_pll = opts->use_pll;
+    pll.freq_gain = opts->pll_gain;
+
+    size_t bit_count = max_bits;
+    flux_status_t status = flux_to_bitstream(flux, bits, &bit_count,
+                                             bitcell_ns, &pll);
+    if (status != FLUX_OK) { free(bits); return status; }
+
+    track->track_length_bits = (uint32_t)bit_count;
+    track->detected_encoding = FLUX_ENC_AMIGA;
+    track->avg_bitrate = 1e9 / pll.period;
+
+    size_t pos = 0;
+    while (pos < bit_count && track->sector_count < FLUX_MAX_SECTORS) {
+        int sync_pos = flux_find_sync(bits, bit_count, MFM_SYNC_PATTERN, pos);
+        if (sync_pos < 0) break;
+
+        flux_decoded_sector_t *sector = &track->sectors[track->sector_count];
+        memset(sector, 0, sizeof(*sector));
+
+        size_t sector_end = 0;
+        status = decode_amiga_sector(bits, bit_count, (size_t)sync_pos,
+                                     sector, &sector_end);
+        if (status == FLUX_OK) {
+            track->sector_count++;
+            track->good_sectors++;
+            if (!sector->id_crc_ok)   track->bad_id_crc++;
+            if (!sector->data_crc_ok) track->bad_data_crc++;
+            pos = (sector_end > (size_t)sync_pos + 16)
+                      ? sector_end : (size_t)sync_pos + 16;
+        } else {
+            if (status == FLUX_ERR_NO_DATA) track->missing_data++;
+            pos = (size_t)sync_pos + 16;
+        }
+    }
+
+    if (opts->keep_raw_bits) {
+        track->raw_bits = bits;
+        track->raw_bit_count = bit_count;
+    } else {
+        free(bits);
+    }
+
+    return (track->sector_count > 0) ? FLUX_OK : FLUX_ERR_NO_SYNC;
+}
+
 flux_status_t flux_decode_track(const flux_raw_data_t *flux,
                                 flux_decoded_track_t *track,
                                 const flux_decoder_options_t *opts) {
@@ -991,9 +1173,11 @@ flux_status_t flux_decode_track(const flux_raw_data_t *flux,
     
     switch (encoding) {
         case FLUX_ENC_MFM:
-        case FLUX_ENC_AMIGA:
             return flux_decode_mfm(flux, track, opts);
-        
+
+        case FLUX_ENC_AMIGA:
+            return flux_decode_amiga(flux, track, opts);
+
         case FLUX_ENC_FM:
             return flux_decode_fm(flux, track, opts);
         
