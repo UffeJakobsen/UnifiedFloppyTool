@@ -16,26 +16,26 @@
     "hwtab": "src\\hardwaretab.cpp"
   },
   "counts": {
-    "UNVERIFIED": 11,
-    "PASS": 3
+    "PASS": 5,
+    "UNVERIFIED": 9
   },
   "sections": {
     "usb_ids": [
       {
         "key": "UFT_SCP_USB_PID",
-        "uft": 1875,
-        "ref": "needs-source \u2014 SCP USB descriptor PID not vendored (header says 0x0753; hwtab hint says 0x0F8C \u2014 disagree)",
-        "verdict": "UNVERIFIED",
-        "detail": "needs-source \u2014 reference cannot be established without a vendored source",
-        "uft_line": 35
+        "uft": 3980,
+        "ref": 3980,
+        "verdict": "PASS",
+        "detail": "",
+        "uft_line": 41
       },
       {
         "key": "UFT_SCP_USB_VID",
-        "uft": 5824,
-        "ref": "needs-source \u2014 SCP USB descriptor VID not vendored (header says 0x16C0; hwtab hint says 0x16D0 \u2014 disagree)",
-        "verdict": "UNVERIFIED",
-        "detail": "needs-source \u2014 reference cannot be established without a vendored source",
-        "uft_line": 34
+        "uft": 5840,
+        "ref": 5840,
+        "verdict": "PASS",
+        "detail": "",
+        "uft_line": 40
       }
     ],
     "usb_endpoints": [
@@ -45,7 +45,7 @@
         "ref": "needs-source \u2014 SCP interface descriptor not vendored",
         "verdict": "UNVERIFIED",
         "detail": "needs-source \u2014 reference cannot be established without a vendored source",
-        "uft_line": 38
+        "uft_line": 44
       },
       {
         "key": "UFT_SCP_BULK_OUT_EP",
@@ -53,7 +53,7 @@
         "ref": "needs-source \u2014 SCP interface descriptor not vendored",
         "verdict": "UNVERIFIED",
         "detail": "needs-source \u2014 reference cannot be established without a vendored source",
-        "uft_line": 39
+        "uft_line": 45
       }
     ],
     "cmd_opcodes": [
@@ -63,7 +63,7 @@
         "ref": "needs-source \u2014 SCP SDK v1.7 command header not vendored",
         "verdict": "UNVERIFIED",
         "detail": "needs-source \u2014 reference cannot be established without a vendored source",
-        "uft_line": 46
+        "uft_line": 52
       },
       {
         "key": "UFT_SCP_CMD_GET_INFO",
@@ -71,7 +71,7 @@
         "ref": "needs-source \u2014 SCP SDK v1.7 command header not vendored",
         "verdict": "UNVERIFIED",
         "detail": "needs-source \u2014 reference cannot be established without a vendored source",
-        "uft_line": 47
+        "uft_line": 53
       },
       {
         "key": "UFT_SCP_CMD_READ_FLUX",
@@ -79,7 +79,7 @@
         "ref": "needs-source \u2014 SCP SDK v1.7 command header not vendored",
         "verdict": "UNVERIFIED",
         "detail": "needs-source \u2014 reference cannot be established without a vendored source",
-        "uft_line": 42
+        "uft_line": 48
       },
       {
         "key": "UFT_SCP_CMD_SELECT_DRIVE",
@@ -87,7 +87,7 @@
         "ref": "needs-source \u2014 SCP SDK v1.7 command header not vendored",
         "verdict": "UNVERIFIED",
         "detail": "needs-source \u2014 reference cannot be established without a vendored source",
-        "uft_line": 44
+        "uft_line": 50
       },
       {
         "key": "UFT_SCP_CMD_SET_CONTROL",
@@ -95,7 +95,7 @@
         "ref": "needs-source \u2014 SCP SDK v1.7 command header not vendored",
         "verdict": "UNVERIFIED",
         "detail": "needs-source \u2014 reference cannot be established without a vendored source",
-        "uft_line": 45
+        "uft_line": 51
       },
       {
         "key": "UFT_SCP_CMD_WRITE_FLUX",
@@ -103,7 +103,7 @@
         "ref": "needs-source \u2014 SCP SDK v1.7 command header not vendored",
         "verdict": "UNVERIFIED",
         "detail": "needs-source \u2014 reference cannot be established without a vendored source",
-        "uft_line": 43
+        "uft_line": 49
       }
     ],
     "timing": [
@@ -113,7 +113,7 @@
         "ref": "UFT implementation choice (3) \u2014 not a fixed SCP protocol constant",
         "verdict": "UNVERIFIED",
         "detail": "impl-choice \u2014 reference cannot be established without a vendored source",
-        "uft_line": 71
+        "uft_line": 77
       },
       {
         "key": "UFT_SCP_FLUX_NS_PER_SAMPLE",
@@ -121,7 +121,7 @@
         "ref": 25,
         "verdict": "PASS",
         "detail": "",
-        "uft_line": 67
+        "uft_line": 73
       },
       {
         "key": "UFT_SCP_MAX_REVOLUTIONS",
@@ -129,7 +129,7 @@
         "ref": 5,
         "verdict": "PASS",
         "detail": "",
-        "uft_line": 70
+        "uft_line": 76
       },
       {
         "key": "UFT_SCP_MAX_TRACK_INDEX",
@@ -137,7 +137,7 @@
         "ref": 167,
         "verdict": "PASS",
         "detail": "",
-        "uft_line": 50
+        "uft_line": 56
       }
     ]
   }

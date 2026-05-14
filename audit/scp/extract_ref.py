@@ -80,18 +80,15 @@ CMD_OPCODES = {
                                    "kind": "needs-source"},
 }
 
-# USB identity: needs-source. The SuperCard Pro's actual USB descriptor
-# VID/PID could not be confirmed from a vendored source. The header uses
-# 0x16C0/0x0753 (a Van Ooijen / pid.codes shared-VID range); the GUI
-# hint in hardwaretab.cpp uses a DIFFERENT pair (0x16D0/0x0F8C) — the
-# internal disagreement is itself a finding (SCP-D4-1).
+# USB identity: VERIFIED (SCP-D4-1 RESOLVED, audit ARCH-7-B / MF-212).
+# The header once said 0x16C0/0x0753 and disagreed with the GUI port-
+# hint; the real device descriptor (USB\VID_16D0&PID_0F8C) confirmed the
+# GUI hint was correct. uft_scp_direct.h was corrected and now single-
+# sources the value. Plain ints => diff.py compares them => PASS rows
+# (no longer needs-source UNVERIFIED).
 USB_IDS = {
-    "UFT_SCP_USB_VID": {"ref": "needs-source — SCP USB descriptor VID not vendored "
-                               "(header says 0x16C0; hwtab hint says 0x16D0 — disagree)",
-                        "kind": "needs-source"},
-    "UFT_SCP_USB_PID": {"ref": "needs-source — SCP USB descriptor PID not vendored "
-                               "(header says 0x0753; hwtab hint says 0x0F8C — disagree)",
-                        "kind": "needs-source"},
+    "UFT_SCP_USB_VID": 0x16D0,
+    "UFT_SCP_USB_PID": 0x0F8C,
 }
 
 # USB Bulk endpoints: needs-source.

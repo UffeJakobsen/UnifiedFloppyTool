@@ -54,14 +54,17 @@ _Static_assert(UFT_SCP_CMD_DESELECT_DRIVE == 0x09,
 _Static_assert(UFT_SCP_CMD_GET_INFO       == 0x40,
     "SCP CMD_GET_INFO pinned at 0x40 (UNVERIFIED — needs vendored SDK)");
 
-/* ── USB identity + endpoints (needs-source — regression-pin ONLY) ──── */
-/* SCP-D4-1: the header VID/PID (0x16C0/0x0753) DISAGREES with the GUI
- * port-hint pair in hardwaretab.cpp (0x16D0/0x0F8C). At least one is
- * wrong; neither is vendored. Pinned here to catch silent drift. */
-_Static_assert(UFT_SCP_USB_VID     == 0x16C0,
-    "SCP USB VID pinned at 0x16C0 (UNVERIFIED — disagrees with hwtab hint)");
-_Static_assert(UFT_SCP_USB_PID     == 0x0753,
-    "SCP USB PID pinned at 0x0753 (UNVERIFIED — disagrees with hwtab hint)");
+/* ── USB identity + endpoints ──────────────────────────────────────── */
+/* SCP-D4-1 RESOLVED (audit ARCH-7-B / MF-212): the header VID/PID once
+ * read 0x16C0/0x0753 and DISAGREED with the GUI port-hint. Verified
+ * against the real device descriptor (USB\VID_16D0&PID_0F8C) — the GUI
+ * hint was correct; uft_scp_direct.h was corrected and now single-
+ * sources the value. These pins track the VERIFIED value and catch
+ * silent drift. */
+_Static_assert(UFT_SCP_USB_VID     == 0x16D0,
+    "SCP USB VID pinned at 0x16D0 (VERIFIED — real device descriptor, MF-212)");
+_Static_assert(UFT_SCP_USB_PID     == 0x0F8C,
+    "SCP USB PID pinned at 0x0F8C (VERIFIED — real device descriptor, MF-212)");
 _Static_assert(UFT_SCP_BULK_IN_EP  == 0x81,
     "SCP Bulk IN endpoint pinned at 0x81 (UNVERIFIED — needs vendored descriptor)");
 _Static_assert(UFT_SCP_BULK_OUT_EP == 0x01,
