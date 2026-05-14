@@ -230,7 +230,8 @@ def _parse_rpm(text: str) -> float | None:
 # --- report ----------------------------------------------------------
 
 def render_report(version: str, disks: list[DiskResult],
-                  catalog_path: Path) -> str:
+                  catalog_path: Path,
+                  software_ref: dict | None = None) -> str:
     if not disks:
         overall = "NOT_RUN"
     else:
@@ -243,7 +244,7 @@ def render_report(version: str, disks: list[DiskResult],
         "",
         f"- Generated: {now}",
         f"- Catalog: `{catalog_path.relative_to(REPO_ROOT)}`",
-        f"- **Overall: {overall}**",
+        f"- **Overall (hardware tier): {overall}**",
         "",
         "Automated subset of `tests/HARDWARE_TRUTH_TESTS.md` "
         "(read→SHA-256, rpm±0.5). Physical-observation rows "
@@ -257,7 +258,34 @@ def render_report(version: str, disks: list[DiskResult],
             "is assembled and the rig is connected. It is **not** a PASS.",
             "",
         ]
-    lines += ["## Disks", ""]
+
+    # Software golden tier — runs in CI, no hardware. Reported here so a
+    # NOT_RUN hardware verdict is never read as "nothing is verified":
+    # the decode engine IS verified, on every push, against gw.
+    if software_ref:
+        classes = software_ref.get("disk_classes", []) or []
+        lines += [
+            "## Software golden reference (CI tier — no hardware)",
+            "",
+            f"- Status: **{software_ref.get('status', '?')}**  "
+            f"({len(classes)} disk classes)",
+            f"- Harness: `{software_ref.get('harness', '?')}`",
+            f"- Manifest: `{software_ref.get('manifest', '?')}`",
+            "",
+            "Each class is decoded by BOTH the UFT flux engine and "
+            "`gw convert` and asserted byte-identical — this tier runs "
+            "in GitHub Actions on every push, unlike the hardware tier.",
+            "",
+            "| Disk class | gw format | encoding |",
+            "|------------|-----------|----------|",
+        ]
+        for c in classes:
+            lines.append(
+                f"| {c.get('id', '?')} | {c.get('gw_format', '?')} "
+                f"| {c.get('encoding', '?')} |")
+        lines.append("")
+
+    lines += ["## Disks (hardware tier)", ""]
     if not disks:
         lines.append("_No disks in catalog._")
     for d in disks:
@@ -314,7 +342,8 @@ def main(argv: list[str] | None = None) -> int:
         for disk in disks_cfg:
             results.append(check_disk(disk, uft, tmp))
 
-    report = render_report(args.version, results, args.catalog)
+    report = render_report(args.version, results, args.catalog,
+                           catalog.get("software_reference"))
 
     out = args.out or (REPO_ROOT / "releases" / args.version / "hil_report.md")
     out.parent.mkdir(parents=True, exist_ok=True)

@@ -1,15 +1,24 @@
 # Golden-Reference disk catalog — Hardware-in-the-Loop (P3.4)
 #
-# This catalog describes the *physical* reference disks Axel keeps for
-# HIL verification. The disks themselves cannot live in git — only their
-# metadata and the SHA-256 of the baseline artefact each one produced on
-# `main` @ MF-149 (see tests/HARDWARE_TRUTH_TESTS.md "Pre-refactor
-# baseline").
+# This catalog has TWO tiers:
 #
-# run_hil.py reads this file, drives the built `uft` binary against each
-# disk on the matching controller, and compares the result against the
-# recorded `baseline_sha256`. Entries with `status: template` are skipped
-# by the runner — they are documentation, not a claim that the disk
+#   software_reference  — the CI-runnable golden tier. Deterministic
+#                         synthetic disk images, byte-exact verified
+#                         against Greaseweazle, run by GitHub Actions
+#                         on every push. No hardware needed. (#109)
+#   disks               — the HARDWARE golden tier. Physical reference
+#                         disks Axel keeps for HIL verification. The
+#                         disks themselves cannot live in git — only
+#                         their metadata and the SHA-256 of the baseline
+#                         artefact each one produced on `main` @ MF-149
+#                         (see tests/HARDWARE_TRUTH_TESTS.md
+#                         "Pre-refactor baseline").
+#
+# run_hil.py reads the `disks` tier, drives the built `uft` binary
+# against each `status: active` entry on the matching controller, and
+# compares the result against the recorded `baseline_sha256`. Entries
+# with `status: template` are skipped by the runner — they are
+# documentation of the catalog structure, not a claim that the disk
 # exists. Replace them with real entries (status: active) as the
 # Golden-Reference set is assembled.
 #
@@ -17,13 +26,46 @@
 # not captured, leave it null and set status: pending — the runner will
 # report NOT_RUN for that disk, never a false PASS.
 
-catalog_version: 1
+catalog_version: 2
 
 # The frozen Greaseweazle version the corpus + baselines were taken
-# against. Must match tests/gw_corpus/outputs_gw/<ver>/.
+# against. Must match tests/gw_corpus/outputs_gw/<ver>/ and the
+# software_reference tier below.
 gw_reference_version: "1.23"
 
-# Each disk: a physical floppy with known, documented characteristics.
+# ─────────────────────────────────────────────────────────────────────
+# Tier 1 — SOFTWARE golden reference (CI-runnable, no hardware)
+#
+# The P3.2 differential corpus IS a golden-reference catalog: six
+# deterministic synthetic disk images, each decoded by BOTH the UFT
+# flux engine and `gw convert` and asserted byte-identical. It runs in
+# GitHub Actions on every push — the hardware tier below cannot. The
+# committed sources are hash-manifested; the .scp flux streams are a
+# regenerable build artefact (gitignored).
+# ─────────────────────────────────────────────────────────────────────
+software_reference:
+  corpus_dir: tests/differential/corpus
+  manifest: tests/differential/corpus/MANIFEST.sha256   # frozen source hashes
+  generator: tests/differential/gen_corpus.py
+  harness: tests/differential/test_gw_parity.py
+  decoder_fixture: tests/differential/uft_flux_decode.c
+  status: active            # all six classes byte-exact vs gw 1.23
+  disk_classes:
+    - { id: ibm_dd,     gw_format: ibm.720,             encoding: mfm }
+    - { id: ibm_hd,     gw_format: ibm.1440,            encoding: mfm }
+    - { id: atarist_dd, gw_format: atarist.720,         encoding: mfm }
+    - { id: c64_gcr,    gw_format: commodore.1541,      encoding: gcr_c64 }
+    - { id: apple2_525, gw_format: apple2.appledos.140, encoding: gcr_apple }
+    - { id: amiga_dd,   gw_format: amiga.amigados,      encoding: amiga }
+
+# ─────────────────────────────────────────────────────────────────────
+# Tier 2 — HARDWARE golden reference (Axel's rig, manual, per release)
+#
+# One template entry per HAL controller, so the catalog STRUCTURE is
+# complete and ready to fill. Every shipped entry is `status: template`
+# — replace it with a real `status: active` disk + captured baseline as
+# the physical Golden-Reference set is assembled.
+# ─────────────────────────────────────────────────────────────────────
 disks:
   - id: TEMPLATE-gw-ibm-360k
     status: template            # template | pending | active
@@ -47,6 +89,70 @@ disks:
     # RPM baseline for `uft rpm` (±0.5 tolerance per HARDWARE_TRUTH_TESTS).
     baseline_rpm: null          # e.g. 300.0
 
+  - id: TEMPLATE-scp-amiga-880k
+    status: template
+    controller: scp
+    media: "3.5\" DD"
+    description: "AmigaDOS 880 KB disk, known ADF content"
+    photo: photos/TEMPLATE-scp-amiga-880k.jpg
+    baseline_artifact: null
+    baseline_sha256: null
+    read_args:
+      tracks: "0-79"
+      revs: 3
+      image_ext: scp
+    known_marginal_tracks: []
+    known_protection: null
+    baseline_rpm: null          # Amiga DD nominal 300
+
+  - id: TEMPLATE-kryoflux-atarist-720k
+    status: template
+    controller: kryoflux        # read-only (via DTC subprocess)
+    media: "3.5\" DD"
+    description: "Atari ST 720 KB disk, known ST content"
+    photo: photos/TEMPLATE-kryoflux-atarist-720k.jpg
+    baseline_artifact: null
+    baseline_sha256: null
+    read_args:
+      tracks: "0-79"
+      revs: 3
+      image_ext: raw            # KryoFlux stream
+    known_marginal_tracks: []
+    known_protection: null
+    baseline_rpm: null
+
+  - id: TEMPLATE-fluxengine-apple2-140k
+    status: template
+    controller: fluxengine
+    media: "5.25\" SS"
+    description: "Apple II DOS 3.3 disk, 140 KB, 35 trk"
+    photo: photos/TEMPLATE-fluxengine-apple2-140k.jpg
+    baseline_artifact: null
+    baseline_sha256: null
+    read_args:
+      tracks: "0-34"
+      revs: 3
+      image_ext: scp
+    known_marginal_tracks: []
+    known_protection: null
+    baseline_rpm: null
+
+  - id: TEMPLATE-fc5025-ibm-360k
+    status: template
+    controller: fc5025          # read-only, sector-level (no flux)
+    media: "5.25\" DD"
+    description: "IBM PC 360 KB disk — FC5025 reads sectors only"
+    photo: photos/TEMPLATE-fc5025-ibm-360k.jpg
+    baseline_artifact: null
+    baseline_sha256: null
+    read_args:
+      tracks: "0-39"
+      revs: 1                   # FC5025 is sector-level, single read
+      image_ext: img
+    known_marginal_tracks: []
+    known_protection: null
+    baseline_rpm: null
+
   - id: TEMPLATE-xum1541-1541-d64
     status: template
     controller: xum1541
@@ -59,6 +165,54 @@ disks:
       tracks: "1-35"
       revs: 1
       image_ext: d64
+    known_marginal_tracks: []
+    known_protection: null
+    baseline_rpm: null
+
+  - id: TEMPLATE-applesauce-apple2-protected
+    status: template
+    controller: applesauce
+    media: "5.25\" SS"
+    description: "Apple II copy-protected disk, known WOZ content"
+    photo: photos/TEMPLATE-applesauce-apple2-protected.jpg
+    baseline_artifact: null
+    baseline_sha256: null
+    read_args:
+      tracks: "0-39"
+      revs: 3
+      image_ext: woz
+    known_marginal_tracks: []
+    known_protection: "documented scheme — fill in when disk is chosen"
+    baseline_rpm: null
+
+  - id: TEMPLATE-adfcopy-amiga-880k
+    status: template
+    controller: adfcopy
+    media: "3.5\" DD"
+    description: "AmigaDOS 880 KB disk, known ADF content"
+    photo: photos/TEMPLATE-adfcopy-amiga-880k.jpg
+    baseline_artifact: null
+    baseline_sha256: null
+    read_args:
+      tracks: "0-79"
+      revs: 1
+      image_ext: adf
+    known_marginal_tracks: []
+    known_protection: null
+    baseline_rpm: null
+
+  - id: TEMPLATE-usbfloppy-pc-1440k
+    status: template
+    controller: usbfloppy       # sector-level USB floppy drive
+    media: "3.5\" HD"
+    description: "IBM PC 1.44 MB disk, known IMG content"
+    photo: photos/TEMPLATE-usbfloppy-pc-1440k.jpg
+    baseline_artifact: null
+    baseline_sha256: null
+    read_args:
+      tracks: "0-79"
+      revs: 1
+      image_ext: img
     known_marginal_tracks: []
     known_protection: null
     baseline_rpm: null

@@ -93,9 +93,9 @@ ist die einzige Welle-1-Aufgabe ohne Abhängigkeit zu P1.
 | ID    | Task                                                                       | Depends on | Status |
 |-------|----------------------------------------------------------------------------|------------|--------|
 | P3.1  | `gw_corpus/` Skeleton + `tools/uft_diff_test/` + 1 SCP-Fixture + DIV-001  | —          | ✅ MF-182 |
-| P3.2  | Differential-Conformance-Tests pro GW-Command (~50 Tests)                  | P3.1, P1   | 🔄 MF-183: Harness-Body verdrahtet + klassifikations-getestet; ~50 Corpus-Tests brauchen echte `gw`-Installation (HIL) |
-| P3.3  | Improvement-Tests: forensic, multi_device, gui (~40 Tests)                 | P3.1, P1   | 🔄 MF-184: tests/improvement/ Scaffold (6 Kategorien + _support + conftest + skip-Disziplin); ~40 Tests brauchen gebautes uft + pytest-qt |
-| P3.4  | HIL-Skript + Golden-Reference-Katalog + erster v4.1.4-rc1 HIL-Report      | P3.2, P3.3 | 🔄 MF-185: tests/hil/ (run_hil.py + golden_reference.yaml + Scaffold-Tests), erster RC1-Report = NOT_RUN; echter HIL-Lauf braucht Rig + befüllten Katalog (Axel-Maschine) |
+| P3.2  | Differential-Conformance-Tests pro GW-Command (~50 Tests)                  | P3.1, P1   | ✅ MF-217..225: tests/differential/ — 6/6 Disk-Klassen byte-exakt gegen gw 1.23 (IBM-DD/HD, AtariST, C64-GCR, Apple2-GCR, Amiga). Deckte 2 echte Decoder-Bugs auf (MF-218 A1-Sync-Run, MF-224 Apple-6-and-2) + Amiga-MFM-Decoder neu (MF-225) |
+| P3.3  | Improvement-Tests: forensic, multi_device, gui (~40 Tests)                 | P3.1, P1   | ✅ MF-214..228: alle 6 Kategorien geliefert — forensic (MF-214/215/216), gui (MF-220), multi_device (MF-221), concurrency (MF-226), copy_protection (MF-227, +2 uft_longtrack Bugs), format_extension (MF-228) |
+| P3.4  | HIL-Skript + Golden-Reference-Katalog + erster v4.1.4-rc1 HIL-Report      | P3.2, P3.3 | 🔄 MF-185/MF-230: tests/hil/ vollständig — run_hil.py + Scaffold-Tests grün, golden_reference.yaml jetzt ZWEISTUFIG (Software-Tier = #109-Differential-Corpus, CI-aktiv 6/6; Hardware-Tier = 9 Controller-Templates). RC1-Report zeigt beide Tiers. Offen: echter Hardware-Lauf braucht Rig + befüllten Katalog (Axel-Maschine) |
 
 Neue Subagenten (gelandet mit P3.1, MF-182):
 - `differential-test-author` (Sonnet) — pro GW-Command/Format

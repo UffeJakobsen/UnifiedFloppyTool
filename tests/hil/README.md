@@ -1,20 +1,34 @@
 # tests/hil/ — Hardware-in-the-Loop
 
-Layer 6 of the Tester-Strategie (`docs/TESTER_STRATEGY.md` §4). The one
-layer that automation cannot replace: it needs a real controller, a real
-drive and the physical **Golden-Reference** disks.
+Layer 6 of the Tester-Strategie (`docs/TESTER_STRATEGY.md` §4).
 
-**HIL never runs in GitHub Actions.** It runs on Axel's rig, manually,
-once per release. Every release tag needs a passing HIL report under
-`releases/<version>/hil_report.md`.
+## Two-tier Golden-Reference catalog
+
+`golden_reference.yaml` describes the Golden-Reference set in **two
+tiers**, because "golden reference" is not one thing:
+
+| Tier | What | Runs where | Status |
+|------|------|-----------|--------|
+| **Software** (`software_reference`) | The P3.2 differential corpus — six deterministic synthetic disk images, each decoded by both the UFT flux engine and `gw convert` and asserted byte-identical. Hash-manifested. | GitHub Actions, **every push** | `active` — 6/6 byte-exact vs gw 1.23 |
+| **Hardware** (`disks`) | Physical reference floppies on Axel's rig — read→SHA-256 + rpm±0.5 against a frozen baseline. The disks cannot live in git; only their metadata + baseline hash do. | Axel's rig, **manually, per release** | `template` — 9 controller templates, awaiting a populated set |
+
+The software tier is the part automation **can** do, and it does it
+continuously. The hardware tier is the part automation **cannot**
+replace — a real controller, a real drive, the physical disks. A HIL
+report shows both, so a `NOT_RUN` hardware verdict is never misread as
+"nothing is verified".
+
+**The hardware tier never runs in GitHub Actions.** It runs on Axel's
+rig, manually, once per release. Every release tag needs a HIL report
+under `releases/<version>/hil_report.md`.
 
 ## Files
 
 | File | Purpose |
 |------|---------|
-| `golden_reference.yaml` | Catalog of the physical reference disks — id, controller, media, baseline SHA-256, known marginal tracks / protection, baseline RPM. Ships with `status: template` entries only. |
-| `run_hil.py` | Runner. Drives the built `uft` binary against each `status: active` disk, automates the read→SHA-256 and rpm±0.5 checks from `HARDWARE_TRUTH_TESTS.md`, emits a Markdown report. |
-| `test_hil_scaffold.py` | Self-tests — keep `pytest tests/hil/` green and prove the honesty contract (missing rig → NOT_RUN, never a fabricated PASS). |
+| `golden_reference.yaml` | Two-tier catalog (see above). `software_reference` points at the differential corpus; `disks` carries one `status: template` entry per HAL controller. |
+| `run_hil.py` | Runner. Drives the built `uft` binary against each `status: active` hardware disk, automates the read→SHA-256 and rpm±0.5 checks from `HARDWARE_TRUTH_TESTS.md`, and emits a Markdown report that carries both tiers. |
+| `test_hil_scaffold.py` | Self-tests — keep `pytest tests/hil/` green and prove the honesty contract (missing rig → NOT_RUN, never a fabricated PASS) + that the catalog structure is complete (both tiers, all controllers). |
 | `conftest.py` | Puts `tests/hil/` on `sys.path`. |
 
 ## Honesty contract
