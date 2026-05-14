@@ -11,9 +11,10 @@ Strategy: docs/TESTER_STRATEGY.md §2.4.
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Iterable
+from typing import Iterable, Pattern
 
 import yaml
 
@@ -34,6 +35,7 @@ class DivergenceEntry:
     summary: str          # one-line description
     reason: str           # why the divergence is intentional
     scope: str            # what part of the output differs
+    mask: Pattern | None = None   # per-line regex neutralising the divergence
 
     @classmethod
     def from_dict(cls, raw: dict) -> "DivergenceEntry":
@@ -47,12 +49,23 @@ class DivergenceEntry:
                 f"divergence entry {raw.get('id', '<no id>')} is missing "
                 f"required field(s): {', '.join(missing)}"
             )
+        mask_raw = raw.get("mask")
+        mask: Pattern | None = None
+        if mask_raw is not None:
+            try:
+                mask = re.compile(str(mask_raw))
+            except re.error as exc:
+                raise ValueError(
+                    f"divergence entry {raw['id']}: 'mask' is not a valid "
+                    f"regex: {exc}"
+                ) from exc
         return cls(
             id=str(raw["id"]),
             command=str(raw["command"]),
             summary=str(raw["summary"]),
             reason=str(raw["reason"]),
             scope=str(raw["scope"]),
+            mask=mask,
         )
 
 

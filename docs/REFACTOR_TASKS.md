@@ -82,7 +82,7 @@ ist die einzige Welle-1-Aufgabe ohne Abhängigkeit zu P1.
 | ID    | Task                                                                       | Depends on | Status |
 |-------|----------------------------------------------------------------------------|------------|--------|
 | P3.1  | `gw_corpus/` Skeleton + `tools/uft_diff_test/` + 1 SCP-Fixture + DIV-001  | —          | ✅ MF-182 |
-| P3.2  | Differential-Conformance-Tests pro GW-Command (~50 Tests)                  | P3.1, P1   | ⬜     |
+| P3.2  | Differential-Conformance-Tests pro GW-Command (~50 Tests)                  | P3.1, P1   | 🔄 MF-183: Harness-Body verdrahtet + klassifikations-getestet; ~50 Corpus-Tests brauchen echte `gw`-Installation (HIL) |
 | P3.3  | Improvement-Tests: forensic, multi_device, gui (~40 Tests)                 | P3.1, P1   | ⬜     |
 | P3.4  | HIL-Skript + Golden-Reference-Katalog + erster v4.1.4-rc1 HIL-Report      | P3.2, P3.3 | ⬜     |
 

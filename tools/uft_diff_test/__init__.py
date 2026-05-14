@@ -12,14 +12,16 @@ identical input and compare outputs byte-for-byte. Four outcomes:
     DIVERGE_BAD  outputs differ, NOT in the registry          → FAIL
     FAIL         a tool crashed / produced no output          → FAIL
 
-> **Status: SKELETON (P3.1, Welle 1).** `differential_command()` does
-> NOT yet execute `gw`/`uft`. It returns a `SKELETON` result and the
-> real subprocess wiring + byte comparison land in Welle 2 (P3.2).
-> `DiffResult.assert_pass()` therefore *skips* on a SKELETON result so
-> the suite stays honest: a skeleton test is not a passing gw-compat
-> proof, it is a not-yet-implemented one.
+> **Status: HARNESS WIRED (P3.2, Welle 2).** `differential_command()`
+> now really runs `gw` and `uft`, applies the registry masks, and
+> classifies the result. What is still pending is the *corpus* —
+> real `gw` v1.23 reference inputs/outputs and the ~50 per-command
+> tests, which require a machine with `gw` installed (HIL / Axel's
+> setup, TESTER_STRATEGY §4). When `gw`/`uft` are not on PATH the
+> harness returns `TOOL_MISSING` and `assert_pass()` skips — an
+> un-runnable check must not masquerade as green.
 
-Usage (the shape Welle 2 tests will use unchanged):
+Usage (the shape every per-command test uses unchanged):
 
     from uft_diff_test import differential_command, corpus
 
@@ -39,7 +41,14 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Sequence
 
-from .registry import DivergenceRegistry, load_registry
+from .registry import DivergenceEntry, DivergenceRegistry, load_registry
+from .runner import (
+    SubprocessRunner,
+    ToolInvocation,
+    ToolResult,
+    ToolRunner,
+    resolve_executable,
+)
 
 __all__ = [
     "DiffStatus",
@@ -48,8 +57,13 @@ __all__ = [
     "corpus",
     "corpus_root",
     "sha256_file",
+    "DivergenceEntry",
     "DivergenceRegistry",
     "load_registry",
+    "ToolInvocation",
+    "ToolResult",
+    "ToolRunner",
+    "SubprocessRunner",
 ]
 
 # --------------------------------------------------------------------------
@@ -98,10 +112,15 @@ def sha256_file(path: Path) -> str:
 
 class DiffStatus(enum.Enum):
     IDENT = "IDENT"               # byte-identical → PASS
-    DIVERGE_OK = "DIVERGE_OK"     # differs, registered reason → PASS
+    DIVERGE_OK = "DIVERGE_OK"     # differs, registered+masked reason → PASS
     DIVERGE_BAD = "DIVERGE_BAD"   # differs, no registry entry → FAIL
     FAIL = "FAIL"                 # a tool crashed / no output → FAIL
-    SKELETON = "SKELETON"         # harness not yet wired (Welle 1) → SKIP
+    TOOL_MISSING = "TOOL_MISSING"  # gw / uft not on PATH → SKIP
+    SKELETON = "SKELETON"         # harness not wired for this command → SKIP
+
+
+# Statuses that assert_pass() treats as a skip rather than pass/fail.
+_SKIP_STATUSES = (DiffStatus.TOOL_MISSING, DiffStatus.SKELETON)
 
 
 @dataclass
@@ -112,27 +131,27 @@ class DiffResult:
     command: str
     args: Sequence[str] = field(default_factory=list)
     detail: str = ""
-    divergence_id: str | None = None   # DIV-NNN when status is DIVERGE_OK
+    divergence_ids: list[str] = field(default_factory=list)  # DIV-NNN applied
 
     def assert_pass(self) -> None:
         """
         Assert this differential passed. Semantics:
 
-            IDENT / DIVERGE_OK   → pass silently
-            DIVERGE_BAD / FAIL   → raise AssertionError with detail
-            SKELETON             → pytest.skip() (harness not wired yet)
+            IDENT / DIVERGE_OK         → pass silently
+            DIVERGE_BAD / FAIL         → raise AssertionError with detail
+            TOOL_MISSING / SKELETON    → pytest.skip()
 
-        SKELETON is skipped, never passed: a not-yet-implemented
-        gw-compat check must not masquerade as a green proof.
+        The skip statuses are skipped, never passed: a check that could
+        not actually run must not masquerade as a green gw-compat proof.
         """
         if self.status in (DiffStatus.IDENT, DiffStatus.DIVERGE_OK):
             return
-        if self.status == DiffStatus.SKELETON:
+        if self.status in _SKIP_STATUSES:
             import pytest
 
             pytest.skip(
-                f"uft_diff_test skeleton: '{self.command}' differential "
-                f"not wired yet — lands in Welle 2 (P3.2). {self.detail}"
+                f"uft_diff_test [{self.status.value}]: '{self.command}' "
+                f"differential could not run — {self.detail}"
             )
             return
         raise AssertionError(
@@ -146,32 +165,54 @@ class DiffResult:
 # --------------------------------------------------------------------------
 
 
+def _mask_payload(payload: bytes, masks: Sequence) -> tuple[str, set]:
+    """
+    Drop every line matching any mask regex. Returns the surviving text
+    and the set of mask-pattern objects that actually removed something
+    (so the caller knows which DIV entries were load-bearing).
+    """
+    text = payload.decode("utf-8", errors="replace")
+    kept_lines = []
+    used = set()
+    for line in text.splitlines():
+        matched = next((m for m in masks if m.search(line)), None)
+        if matched is not None:
+            used.add(matched)
+        else:
+            kept_lines.append(line)
+    return "\n".join(kept_lines), used
+
+
 def differential_command(
     command: str,
     args: Sequence[str] | None = None,
     input_file: Path | None = None,
     registry: DivergenceRegistry | None = None,
+    *,
+    runner: ToolRunner | None = None,
+    gw_path: str | None = None,
+    uft_path: str | None = None,
 ) -> DiffResult:
     """
     Run `gw <command>` and `uft <command>` on identical input, compare
     their outputs, classify the result against the divergence registry.
 
-    SKELETON (P3.1): this function does NOT execute anything yet. It
-    validates its arguments and returns a SKELETON DiffResult. Welle 2
-    (P3.2) replaces the body below with real subprocess execution and
-    byte comparison — the *signature and return type stay frozen* so
-    tests written against it now keep working unchanged.
+    Classification:
+        1. either tool absent / crashed     → TOOL_MISSING / FAIL
+        2. payloads byte-identical          → IDENT
+        3. apply every registry mask that applies to `command`;
+           if the masked payloads are now equal → DIVERGE_OK
+           (divergence_ids lists the DIV-NNN entries that were used)
+        4. still different                  → DIVERGE_BAD
 
-    Welle-2 body sketch (intentionally not implemented here):
-        1. run gw  → capture stdout/stderr/exit + any output file
-        2. run uft → same
-        3. if either crashed                → DiffStatus.FAIL
-        4. if outputs byte-identical         → DiffStatus.IDENT
-        5. else look up (command, args) in `registry`
-             - found  → DiffStatus.DIVERGE_OK + divergence_id
-             - absent → DiffStatus.DIVERGE_BAD
+    `runner` is injectable so the classification logic is unit-testable
+    with a FakeRunner — no `gw` / `uft` binary needed in CI. The default
+    is a real SubprocessRunner.
     """
     args = list(args or [])
+    runner = runner or SubprocessRunner()
+    if registry is None:
+        registry = load_registry()
 
     if input_file is not None:
         input_file = Path(input_file)
@@ -183,10 +224,78 @@ def differential_command(
                 detail=f"input_file does not exist: {input_file}",
             )
 
-    # Skeleton: argument plumbing verified, execution deferred to Welle 2.
+    # --- resolve both binaries -------------------------------------------
+    gw_exe = resolve_executable("gw", gw_path)
+    uft_exe = resolve_executable("uft", uft_path)
+    missing = [
+        name
+        for name, exe in (("gw", gw_exe), ("uft", uft_exe))
+        if exe is None
+    ]
+    if missing:
+        return DiffResult(
+            status=DiffStatus.TOOL_MISSING,
+            command=command,
+            args=args,
+            detail=(
+                f"not on PATH: {', '.join(missing)} "
+                f"(set UFT_DIFF_GW / UFT_DIFF_UFT to override)"
+            ),
+        )
+
+    # --- run both ---------------------------------------------------------
+    argv = [command, *args]
+    if input_file is not None:
+        argv.append(str(input_file))
+
+    gw_res = runner.run(ToolInvocation("gw", gw_exe, argv))
+    uft_res = runner.run(ToolInvocation("uft", uft_exe, argv))
+
+    for res in (gw_res, uft_res):
+        if res.crashed or res.exit_code != 0:
+            how = "crashed" if res.crashed else f"exit {res.exit_code}"
+            return DiffResult(
+                status=DiffStatus.FAIL,
+                command=command,
+                args=args,
+                detail=(
+                    f"{res.invocation.tool} {how}: "
+                    f"{res.stderr.decode('utf-8', 'replace').strip()[:200]}"
+                ),
+            )
+
+    # --- compare ----------------------------------------------------------
+    if gw_res.payload == uft_res.payload:
+        return DiffResult(
+            status=DiffStatus.IDENT, command=command, args=args
+        )
+
+    applicable = registry.for_command(command)
+    masks = [e.mask for e in applicable if e.mask is not None]
+    gw_masked, gw_used = _mask_payload(gw_res.payload, masks)
+    uft_masked, uft_used = _mask_payload(uft_res.payload, masks)
+
+    if gw_masked == uft_masked and (gw_used or uft_used):
+        used_patterns = gw_used | uft_used
+        div_ids = sorted(
+            e.id
+            for e in applicable
+            if e.mask is not None and e.mask in used_patterns
+        )
+        return DiffResult(
+            status=DiffStatus.DIVERGE_OK,
+            command=command,
+            args=args,
+            detail=f"divergence neutralised by {', '.join(div_ids)}",
+            divergence_ids=div_ids,
+        )
+
     return DiffResult(
-        status=DiffStatus.SKELETON,
+        status=DiffStatus.DIVERGE_BAD,
         command=command,
         args=args,
-        detail="differential_command() body is a P3.1 skeleton stub",
+        detail=(
+            "outputs differ and no divergence registry entry accounts "
+            "for it — fix the code or add a DIV-NNN entry with a reason"
+        ),
     )

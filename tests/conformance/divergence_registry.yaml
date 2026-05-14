@@ -16,6 +16,15 @@
 #   summary  — one line
 #   reason   — why the divergence is intentional and acceptable
 #
+# Optional field:
+#   mask     — a Python regex applied per-line to BOTH outputs before
+#              byte-comparison. Lines matching the mask are dropped from
+#              both sides. If, after applying every applicable mask, the
+#              outputs are equal, the result is DIVERGE_OK (the divergence
+#              was fully accounted for). Entries without a `mask` document
+#              a divergence the harness cannot auto-neutralise (e.g. an
+#              extra sidecar file) — those are handled test-side.
+#
 # Status: SKELETON (P3.1, Welle 1). DIV-001 is the bootstrap entry.
 # DIV-002+ land with the per-command differential tests in P3.2.
 
@@ -35,3 +44,4 @@ divergences:
       tests must mask the banner line before byte-comparing the
       substantive payload; this entry authorises that mask for every
       command.
+    mask: '^(Greaseweazle|UnifiedFloppyTool|UFT)\b.*$'
