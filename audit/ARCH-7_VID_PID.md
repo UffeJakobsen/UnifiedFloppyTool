@@ -119,13 +119,15 @@ ARCH-7-C scope.
 |-------------|-------|-------|
 | A — XUM1541 GUI hint | fixable-now | ✅ fixed (MF-190) |
 | B — SCP header vs GUI | was needs-hardware | ✅ resolved (MF-212) — verified `0x16D0:0x0F8C`, single-sourced in `uft_scp_direct.h` |
-| C — ADF-Copy/Applesauce shared ID + KryoFlux generic FTDI | needs-design | 🔄 design done (MF-198); Tier 1 + `probe_teensy_serial()` + test landed (MF-213). **Verified (Axel `lsusb`): both devices ship the *stock* Teensy descriptors** → Tier-1 string heuristic cannot distinguish them, the probe (Tier 2) is mandatory. Tier-2 *wiring into Connect* still pending the M3.x serial transports |
+| C — ADF-Copy/Applesauce shared ID | was needs-design | ✅ implemented (MF-213) — Tier-1 ambiguity hint + `classify_teensy_probe()` (pure, unit-tested) + `probe_teensy_serial()` + wired into `onConnect()`. **Verified (Axel readout): both devices ship the *stock* Teensy descriptors** → Tier-1 string heuristic is useless for them, the Tier-2 probe is the authoritative answer |
 
-Task #121: A + B done; C has the Tier-1 hint + the authoritative probe
-function + its test. The remaining open piece is wiring the probe into
-the connect path — that needs the ADF-Copy / Applesauce providers to
-have a real serial transport (M3.x), which they do not yet. No value
-was ever guessed — "keine erfundenen Daten".
+Task #121: **A + B + C all done.** The probe is wired into the connect
+path — it opens its OWN serial port, so it does not depend on the
+ADF-Copy / Applesauce providers having a production transport (that is
+separate M3.x work). KryoFlux's generic-FTDI `0x0403:0x6001` is the
+same class of problem and gets the same probe-pattern treatment as a
+documented follow-up (out of ARCH-7 scope). No value was ever
+guessed — "keine erfundenen Daten".
 
 ## Reproduce
 
