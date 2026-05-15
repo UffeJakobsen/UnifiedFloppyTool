@@ -43,8 +43,7 @@ set(_HEADER_ONLY_CPP_TESTS
     "${CMAKE_CURRENT_SOURCE_DIR}/test_adfcopy_provider_v2.cpp"     # MF-167 P1.14
     "${CMAKE_CURRENT_SOURCE_DIR}/test_usbfloppy_provider_v2.cpp"   # MF-168 P1.15
     "${CMAKE_CURRENT_SOURCE_DIR}/test_teensy_probe.cpp"           # MF-213 ARCH-7-C
-    "${CMAKE_CURRENT_SOURCE_DIR}/test_concurrency.cpp"            # MF-226 P3.3 #110a
-    "${CMAKE_CURRENT_SOURCE_DIR}/unit/test_transitions_ns_contract.cpp") # v4.1.5 audit Lücke #2 (ARCH-2) — .cpp because outcomes.h is C++
+    "${CMAKE_CURRENT_SOURCE_DIR}/test_concurrency.cpp")           # MF-226 P3.3 #110a
 
 set(TEST_SOURCES ${TEST_SOURCES_C} ${_HEADER_ONLY_CPP_TESTS})
 
@@ -444,12 +443,22 @@ foreach(test_source ${TEST_SOURCES})
     elseif(${test_name} STREQUAL "test_transitions_ns_contract")
         # v4.1.5 hardening / audit Lücke #2 (ARCH-2): enforces the
         # FluxCaptured::transitions_ns nanosecond-interval contract on
-        # MockProviderV2. Same self-contained shape as
-        # test_mock_provider_v2.
+        # MockProviderV2.
+        #
+        # Pure-C test (.c) per stop-hook spec. FluxCaptured is a C++
+        # sum-type variant — pure C cannot parse outcomes.h directly.
+        # Bridged via the tests/unit/transitions_ns_ffi.cpp wrapper
+        # which exposes extern-"C" entry points. The .c test stays
+        # forensically minimal; all C++ details live in the wrapper
+        # next to it. Link language is forced to CXX so the C++ ABI
+        # (std::string + std::vector in FluxCaptured) resolves at
+        # link time without depending on the C-test compilation mode.
         target_sources(${test_name} PRIVATE
-            ${CMAKE_SOURCE_DIR}/tests/mock_provider_v2.cpp)
+            ${CMAKE_SOURCE_DIR}/tests/mock_provider_v2.cpp
+            ${CMAKE_SOURCE_DIR}/tests/unit/transitions_ns_ffi.cpp)
         target_include_directories(${test_name} PRIVATE
             ${CMAKE_SOURCE_DIR}/tests)
+        set_target_properties(${test_name} PROPERTIES LINKER_LANGUAGE CXX)
         set(TEST_LIBS "")
     elseif(${test_name} STREQUAL "test_gw_protocol")
         # MF-135: GW protocol regression tests need uft_gw_strerror() +

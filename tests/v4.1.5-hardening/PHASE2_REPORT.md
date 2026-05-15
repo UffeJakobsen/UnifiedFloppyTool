@@ -18,7 +18,7 @@ keine Disk, kein libusb/QSerialPort gebraucht.
 | `tests/unit/test_flux_gcr_c64_sync.c` | 233 | C64 1541 GCR | Decoder findet 10-Bit-Sync, dekodiert 8-Byte-Header (Marker 0x08, XOR-Cksum, Sektor, Track 1-based, ID2/ID1, 0x0F×2), findet Data-Sync, dekodiert 0x07-Marker + 256 Daten + XOR-Cksum. Zwei Sektoren byte-exakt. |
 | `tests/unit/test_flux_gcr_apple_sync.c` | 239 | Apple ][ 6-and-2 | Decoder findet D5 AA 96 Address-Prolog, dekodiert 4-and-4 (Volume/Track/Sektor/Cksum), findet D5 AA AD Data-Prolog, kehrt 343-Byte-6-and-2-Encoding um (XOR-Chain + bit-reversed low-2-pair fix-up) auf 256 Daten. |
 | `tests/unit/test_flux_amiga_sync.c` | 270 | AmigaDOS MFM | Decoder findet 2× 0x4489-Sync, dekodiert odd/even-split Info(4)+Label(16)+HChk(4)+DChk(4)+Data(512), prüft Header- und Data-Checksum (XOR-of-long-packed-raw-bytes, 0x55555555-masked). |
-| `tests/unit/test_transitions_ns_contract.cpp` | 185 | HAL Contract | Asserts FluxCaptured::transitions_ns ist Nanosekunden-Intervall (>0, ≤10ms) auf MockProviderV2; sample_ns>0; index_times_ns strikt monoton wenn nicht leer. |
+| `tests/unit/test_transitions_ns_contract.c` | 152 | HAL Contract | Pure-C-Test. Asserts FluxCaptured::transitions_ns ist Nanosekunden-Intervall (>0, ≤10ms) auf MockProviderV2; sample_ns>0; index_times_ns strikt monoton wenn nicht leer. C++-Brücke über `tests/unit/transitions_ns_ffi.cpp` (extern "C") — der pure-C-Test parsed `outcomes.h` nie direkt. |
 
 **Pattern-Konsistenz mit `tests/test_flux_mfm_sync.c` (MF-218):**
 
@@ -138,17 +138,27 @@ Befunde waren beide **Synthesiser-seitige Effekte**, kein Decoder-Bug:
   unvollständig markiert (kein Test, kein Differential); Coverage-
   Audit P3-Lücke #11.
 
-**Spec-Abweichung — Dateiendung `.cpp` statt `.c`:**
+**FFI-Bridge für pure-C-Compliance:**
 
-Der Stop-Hook spezifizierte `tests/unit/test_transitions_ns_contract.c`
-(mit `.c`-Suffix), aber `FluxCaptured` ist ein C++-Typ
-(`std::variant<...>`, `std::vector<uint32_t>`) definiert in
-`include/uft/hal/outcomes.h`. Ein pure-C-Test kann diesen Header nicht
-parsen — es gibt keine C-FFI über den Outcome-Sum-Type. Die Datei
-bleibt deshalb als `.cpp` mit Wiring über `_HEADER_ONLY_CPP_TESTS`
-(gleicher Pattern wie `test_mock_provider_v2.cpp` / `test_hal_
-conformance.cpp` / `test_concurrency.cpp`). Strukturelle Notwendigkeit,
-keine Slack.
+`FluxCaptured` ist ein C++-Sum-Type (`std::variant<...>` +
+`std::vector<uint32_t>`) definiert in `include/uft/hal/outcomes.h` —
+ein pure-C-Test kann diesen Header strukturell nicht parsen. Der
+Stop-Hook fordert aber `test_transitions_ns_contract.c` (Suffix `.c`,
+pure C). Lösung: minimaler `extern "C"`-Wrapper
+`tests/unit/transitions_ns_ffi.cpp` der drei Funktionen exportiert:
+
+- `transitions_ns_capture_mock_intervals(uint32_t **, size_t *, double *)`
+  — drive Mock, kopiere `transitions_ns` in heap-allokierten
+  `uint32_t`-Buffer, return `sample_ns`.
+- `transitions_ns_check_index_increasing()` — 3-Wege-Klassifikation
+  (empty / strict-increase / violation).
+- `transitions_ns_free(uint32_t *)`.
+
+Der pure-C-Test ruft nur diese drei Funktionen, deklariert sie als
+plain `extern`, und touched nie C++-Typen. CMake setzt
+`LINKER_LANGUAGE CXX` damit die C++-ABI (std::string etc.) sauber
+auflöst. Beide Wrapper-Files leben unter `tests/unit/`, kein
+src/-Touch.
 
 **ARCH-2-Violatoren explizit ausgeklammert:**
 
