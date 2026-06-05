@@ -887,6 +887,37 @@ foreach(test_source ${TEST_SOURCES})
     message(STATUS "UFT Test ENABLED: ${test_name}")
 endforeach()
 
+# ─────────────────────────────────────────────────────────────────────────────
+# Hardware-emulator tests (post-v4.1.5, see .claude/agents/
+# hardware-emulation-author.md). Each controller's emulator lives under
+# tests/emulators/<controller>/ and tests/flux_gen/<controller>/, outside
+# the main TEST_SOURCES_C glob. The test executables are added explicitly
+# here so the per-emulator file layout (state-machine + flux-gen +
+# defects/) stays the controller-team's local concern.
+#
+# These tests are pure C, use NO production hardware paths (no libusb,
+# no serial port). They model firmware sequencing semantics + synthetic
+# flux determinism so the byte-mock tests can stay short and focused.
+# ─────────────────────────────────────────────────────────────────────────────
+
+# SCP-Direct firmware-realistic emulator (first invocation of the
+# hardware-emulation-author agent).
+add_executable(test_scp_emulator
+    ${CMAKE_SOURCE_DIR}/tests/emulators/scp/test_scp_emulator.c
+    ${CMAKE_SOURCE_DIR}/tests/emulators/scp/firmware_state_machine.c
+    ${CMAKE_SOURCE_DIR}/tests/flux_gen/scp/flux_gen.c
+    ${CMAKE_SOURCE_DIR}/tests/flux_gen/scp/defects/weak_bits.c
+    ${CMAKE_SOURCE_DIR}/tests/flux_gen/scp/defects/crc_errors.c
+    ${CMAKE_SOURCE_DIR}/tests/flux_gen/scp/defects/copy_protection/vmax.c)
+target_include_directories(test_scp_emulator PRIVATE
+    ${CMAKE_SOURCE_DIR}/include
+    ${CMAKE_SOURCE_DIR}/include/uft)
+set_target_properties(test_scp_emulator PROPERTIES
+    C_STANDARD 11
+    RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/tests)
+add_test(NAME test_scp_emulator COMMAND test_scp_emulator)
+message(STATUS "UFT Test ENABLED: test_scp_emulator (firmware-realistic SCP sim)")
+
 # ═══════════════════════════════════════════════════════════════════════════════
 # Qt-based Tests (C++ / QtTest framework)
 # ═══════════════════════════════════════════════════════════════════════════════
